@@ -25,12 +25,12 @@
 #include <string>
 
 extern std::string tempFileName;
-extern std::string statusMessage;
 extern stmdsp::device *m_device;
+
+extern void log(const std::string& str);
 
 TextEditor editor; // file.cpp
 static std::string editorCompiled;
-static std::string compileMessage;
 
 static std::string newTempFileName();
 static void compileEditorCode();
@@ -63,18 +63,13 @@ void codeRenderToolbar()
 
 void codeRenderWidgets()
 {
-    editor.Render("code", {WINDOW_WIDTH - 15, 635}, true);
-
-    if (ImGui::BeginPopup("compile", ImGuiWindowFlags_AlwaysHorizontalScrollbar)) {
-        ImGui::Text(compileMessage.c_str());
-        if (ImGui::Button("Close"))
-            ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-    }
+    editor.Render("code", {WINDOW_WIDTH - 15, 450}, true);
 }
 
 void compileEditorCode()
 {
+    log("Compiling...");
+
     // Scrap cached build if there are changes
     if (editor.GetText().compare(editorCompiled) != 0) {
         std::filesystem::remove(tempFileName + ".o");
@@ -143,7 +138,7 @@ void compileEditorCode()
     std::ifstream result_file (makeOutput);
     std::ostringstream sstr;
     sstr << result_file.rdbuf();
-    compileMessage = sstr.str();
+    log(sstr.str().c_str());
 
     std::filesystem::remove(tempFileName);
     std::filesystem::remove(tempFileName + script_ext);
@@ -151,15 +146,16 @@ void compileEditorCode()
 
     if (result == 0) {
         editorCompiled = editor.GetText();
-        statusMessage = "Compilation succeeded.";
+        log("Compilation succeeded.");
     } else {
-        statusMessage = "Compilation failed.";
-        ImGui::OpenPopup("compile");
+        log("Compilation failed.");
     }
 }
 
 void disassembleCode()
 {
+    log("Disassembling...");
+
     if (tempFileName.size() == 0 || editor.GetText().compare(editorCompiled) != 0) {
         compileEditorCode();
     }
@@ -173,15 +169,15 @@ void disassembleCode()
             std::ifstream result_file (output);
             std::ostringstream sstr;
             sstr << result_file.rdbuf();
-            compileMessage = sstr.str();
+            log(sstr.str().c_str());
         }
 
         ImGui::OpenPopup("compile");
         std::filesystem::remove(output);
 
-        statusMessage = "Ready.";
+        log("Ready.");
     } else {
-        statusMessage = "Failed to load disassembly.";
+        log("Failed to load disassembly.");
     }
 }
 

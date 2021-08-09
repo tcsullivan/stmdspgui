@@ -14,7 +14,7 @@
 #include "imgui.h"
 
 extern stmdsp::device *m_device;
-extern std::string statusMessage;
+extern void log(const std::string& str);
 
 static const char *sampleRateList[6] = {
     "8 kHz",
@@ -91,35 +91,35 @@ void deviceConnect()
             m_device = new stmdsp::device(devices.front());
             if (m_device->connected()) {
                 sampleRatePreview = sampleRateList[m_device->get_sample_rate()];
-                statusMessage = "Connected!";
+                log("Connected!");
             } else {
                 delete m_device;
                 m_device = nullptr;
-                statusMessage = "Failed to connect.";
+                log("Failed to connect.");
             }
         } else {
-            statusMessage = "No devices found.";
+            log("No devices found.");
         }
     } else {
         delete m_device;
         m_device = nullptr;
-        statusMessage = "Disconnected.";
+        log("Disconnected.");
     }
 }
 
 void deviceStart()
 {
     if (m_device == nullptr) {
-        statusMessage = "No device connected.";
+        log("No device connected.");
         return;
     }
 
     if (m_device->is_running()) {
         m_device->continuous_stop();
-        statusMessage = "Ready.";
+        log("Ready.");
     } else {
         m_device->continuous_start();
-        statusMessage = "Running.";
+        log("Running.");
     }
 }
 

@@ -14,6 +14,7 @@
 #include "backends/imgui_impl_opengl2.h"
 
 #include "config.h"
+#include "logview.h"
 #include "stmdsp.hpp"
 
 #include <string>
@@ -40,9 +41,15 @@ extern void deviceRenderToolbar();
 
 // Globals that live here
 std::string tempFileName;
-std::string statusMessage ("Ready.");
 bool done = false;
 stmdsp::device *m_device = nullptr;
+
+static LogView logView;
+
+void log(const std::string& str)
+{
+    logView.AddLog(str);
+}
 
 int main(int, char **)
 {
@@ -69,7 +76,7 @@ int main(int, char **)
 
         // Begin the main view which the controls will be drawn onto.
         ImGui::SetNextWindowPos({0, 22});
-        ImGui::SetNextWindowSize({WINDOW_WIDTH, WINDOW_HEIGHT - 22});
+        ImGui::SetNextWindowSize({WINDOW_WIDTH, WINDOW_HEIGHT - 22 - 200});
         ImGui::Begin("main", nullptr,
                      ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDecoration);
         ImGui::PushFont(font);
@@ -80,9 +87,12 @@ int main(int, char **)
         fileRenderDialog();
         codeRenderWidgets();
 
+        ImGui::SetNextWindowPos({0, WINDOW_HEIGHT - 200});
+        ImGui::SetNextWindowSize({WINDOW_WIDTH, 200});
+        logView.Draw("log", nullptr, ImGuiWindowFlags_NoDecoration);
+
         // Finish main view rendering.
         ImGui::PopFont();
-        ImGui::Text(statusMessage.c_str());
         ImGui::End();
 
         // Draw everything to the screen.

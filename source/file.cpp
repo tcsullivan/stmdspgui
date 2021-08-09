@@ -26,7 +26,7 @@
 #include <vector>
 
 extern TextEditor editor;
-extern std::string statusMessage;
+extern void log(const std::string& str);
 
 enum class FileAction {
     None,
@@ -43,7 +43,7 @@ static void saveCurrentFile()
     if (std::ofstream ofs (fileCurrentPath, std::ios::binary); ofs.good()) {
         const auto& text = editor.GetText();
         ofs.write(text.data(), text.size());
-        statusMessage = "Saved.";
+        log("Saved.");
     }
 }
 
@@ -70,7 +70,7 @@ void fileRenderMenu()
             // TODO modified?
             fileCurrentPath.clear();
             editor.SetText(stmdsp::file_content);
-            statusMessage = "Ready.";
+            log("Ready.");
         }
 
         if (ImGui::MenuItem("Open")) {
@@ -87,7 +87,7 @@ void fileRenderMenu()
 
                     // Treat like new file.
                     fileCurrentPath.clear();
-                    statusMessage = "Ready.";
+                    log("Ready.");
                 }
             }
 
@@ -110,6 +110,7 @@ void fileRenderMenu()
                 "ChooseFileDlgKey", "Choose File", ".cpp", ".");
         }
 
+        ImGui::Separator();
         if (ImGui::MenuItem("Quit")) {
             extern bool done;
             done = true;
@@ -131,7 +132,7 @@ void fileRenderDialog()
             case FileAction::Open:
                 fileCurrentPath = filePathName;
                 openCurrentFile();
-                statusMessage = "Ready.";
+                log("Ready.");
                 break;
             case FileAction::SaveAs:
                 fileCurrentPath = filePathName;

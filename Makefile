@@ -31,5 +31,5 @@ clean:
 
 %.o: %.cc
 	@echo "  CXX   " $<
-	g++ $(CXXFLAGS) -c $< -o $@
+	@g++ $(CXXFLAGS) -c $< -o $@
 
