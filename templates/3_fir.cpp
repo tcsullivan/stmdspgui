@@ -7,9 +7,9 @@
  * within the available execution time. Samples are also normalized so that they center around zero.
  */
 
-adcsample_t *process_data(adcsample_t *samples, unsigned int size)
+Sample *process_data(Samples samples)
 {
-    static adcsample_t buffer[SIZE];
+    static Sample buffer[samples.size()];
 
 	// Define the filter:
 	constexpr unsigned int filter_size = 3;
@@ -19,9 +19,9 @@ adcsample_t *process_data(adcsample_t *samples, unsigned int size)
 	};
 
     // Do an overlap-save convolution
-    static adcsample_t prev[filter_size];
+    static Sample prev[filter_size];
 
-    for (int n = 0; n < size; n++) {
+    for (int n = 0; n < samples.size(); n++) {
         // Using a float variable for accumulation allows for better code optimization
         float v = 0;
 
@@ -40,7 +40,7 @@ adcsample_t *process_data(adcsample_t *samples, unsigned int size)
 
     // Save samples for next convolution
     for (int i = 0; i < filter_size; i++)
-        prev[i] = samples[size - filter_size + i];
+        prev[i] = samples[samples.size() - filter_size + i];
 
     return buffer;
 }

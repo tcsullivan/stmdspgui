@@ -87,6 +87,7 @@ void fileRenderMenu()
 
                     // Treat like new file.
                     fileCurrentPath.clear();
+                    statusMessage = "Ready.";
                 }
             }
 
