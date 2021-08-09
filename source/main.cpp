@@ -20,7 +20,8 @@
 #include <string>
 
 // Externs
-extern ImFont *font;
+extern ImFont *fontSans;
+extern ImFont *fontMono;
 
 extern bool guiInitialize();
 extern void guiHandleEvents(bool& done);
@@ -79,20 +80,22 @@ int main(int, char **)
         ImGui::SetNextWindowSize({WINDOW_WIDTH, WINDOW_HEIGHT - 22 - 200});
         ImGui::Begin("main", nullptr,
                      ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDecoration);
-        ImGui::PushFont(font);
 
         // Render main controls (order is important).
+        ImGui::PushFont(fontSans);
         codeRenderToolbar();
         deviceRenderToolbar();
         fileRenderDialog();
-        codeRenderWidgets();
+        ImGui::PopFont();
 
+        ImGui::PushFont(fontMono);
+        codeRenderWidgets();
         ImGui::SetNextWindowPos({0, WINDOW_HEIGHT - 200});
         ImGui::SetNextWindowSize({WINDOW_WIDTH, 200});
         logView.Draw("log", nullptr, ImGuiWindowFlags_NoDecoration);
+        ImGui::PopFont();
 
         // Finish main view rendering.
-        ImGui::PopFont();
         ImGui::End();
 
         // Draw everything to the screen.

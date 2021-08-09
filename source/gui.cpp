@@ -18,7 +18,8 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
 
-ImFont *font = nullptr;
+ImFont *fontSans = nullptr;
+ImFont *fontMono = nullptr;
 static ImGuiIO *io = nullptr;
 static SDL_Window *window = nullptr;
 static decltype(SDL_GL_CreateContext(nullptr)) gl_context;
@@ -49,7 +50,8 @@ bool guiInitialize()
     ImGui::CreateContext();
     io = &ImGui::GetIO();
     io->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    font = io->Fonts->AddFontFromFileTTF("fonts/Roboto-Medium.ttf", 20);
+    fontSans = io->Fonts->AddFontFromFileTTF("fonts/Roboto-Regular.ttf", 20);
+    fontMono = io->Fonts->AddFontFromFileTTF("fonts/RobotoMono-Regular.ttf", 20);
     ImGui::StyleColorsLight();
 
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
