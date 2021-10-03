@@ -37,11 +37,12 @@ extern void codeRenderMenu();
 extern void codeRenderToolbar();
 extern void codeRenderWidgets();
 
+extern void deviceRenderDraw();
 extern void deviceRenderMenu();
 extern void deviceRenderToolbar();
+extern void deviceRenderWidgets();
 
 // Globals that live here
-std::string tempFileName;
 bool done = false;
 stmdsp::device *m_device = nullptr;
 
@@ -79,24 +80,28 @@ int main(int, char **)
         ImGui::SetNextWindowPos({0, 22});
         ImGui::SetNextWindowSize({WINDOW_WIDTH, WINDOW_HEIGHT - 22 - 200});
         ImGui::Begin("main", nullptr,
-                     ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDecoration);
+                     ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDecoration |
+                         ImGuiWindowFlags_NoBringToFrontOnFocus);
 
         // Render main controls (order is important).
         ImGui::PushFont(fontSans);
         codeRenderToolbar();
         deviceRenderToolbar();
         fileRenderDialog();
+        deviceRenderWidgets();
         ImGui::PopFont();
 
         ImGui::PushFont(fontMono);
         codeRenderWidgets();
         ImGui::SetNextWindowPos({0, WINDOW_HEIGHT - 200});
         ImGui::SetNextWindowSize({WINDOW_WIDTH, 200});
-        logView.Draw("log", nullptr, ImGuiWindowFlags_NoDecoration);
+        logView.Draw("log", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBringToFrontOnFocus);
         ImGui::PopFont();
 
         // Finish main view rendering.
         ImGui::End();
+
+        deviceRenderDraw();
 
         // Draw everything to the screen.
         ImGui::Render();

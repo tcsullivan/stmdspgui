@@ -45,6 +45,8 @@ public:
             return;
         }
 
+        ImGui::Text("Log ");
+        ImGui::SameLine();
         if (ImGui::Button("Clear"))
             Clear();
         ImGui::SameLine();

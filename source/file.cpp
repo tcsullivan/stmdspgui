@@ -75,8 +75,8 @@ void fileRenderMenu()
 
         if (ImGui::MenuItem("Open")) {
             fileAction = FileAction::Open;
-            ImGuiFileDialog::Instance()->OpenDialog(
-                "ChooseFileDlgKey", "Choose File", ".cpp", ".");
+            ImGuiFileDialog::Instance()->OpenModal(
+                "ChooseFileOpenSave", "Choose File", ".cpp", ".");
         }
 
         if (ImGui::BeginMenu("Open Template")) {
@@ -99,15 +99,15 @@ void fileRenderMenu()
                 saveCurrentFile();
             } else {
                 fileAction = FileAction::SaveAs;
-                ImGuiFileDialog::Instance()->OpenDialog(
-                    "ChooseFileDlgKey", "Choose File", ".cpp", ".");
+                ImGuiFileDialog::Instance()->OpenModal(
+                    "ChooseFileOpenSave", "Choose File", ".cpp", ".");
             }
         }
 
         if (ImGui::MenuItem("Save As")) {
             fileAction = FileAction::SaveAs;
-            ImGuiFileDialog::Instance()->OpenDialog(
-                "ChooseFileDlgKey", "Choose File", ".cpp", ".");
+            ImGuiFileDialog::Instance()->OpenModal(
+                "ChooseFileOpenSave", "Choose File", ".cpp", ".");
         }
 
         ImGui::Separator();
@@ -122,7 +122,7 @@ void fileRenderMenu()
 
 void fileRenderDialog()
 {
-    if (ImGuiFileDialog::Instance()->Display("ChooseFileDlgKey")) {
+    if (ImGuiFileDialog::Instance()->Display("ChooseFileOpenSave")) {
         if (ImGuiFileDialog::Instance()->IsOk()) {
             std::string filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
 

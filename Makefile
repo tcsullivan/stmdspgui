@@ -19,7 +19,7 @@ all: $(OUTPUT)
 
 $(OUTPUT): $(OFILES)
 	@echo "  LD    " $(OUTPUT)
-	@g++ $(OFILES) -o $(OUTPUT) -lSDL2 -lGL
+	@g++ $(OFILES) -o $(OUTPUT) -lSDL2 -lGL -lpthread
 
 clean:
 	@echo "  CLEAN"

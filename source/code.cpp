@@ -24,12 +24,12 @@
 #include <iostream>
 #include <string>
 
-extern std::string tempFileName;
 extern stmdsp::device *m_device;
 
 extern void log(const std::string& str);
 
 TextEditor editor; // file.cpp
+std::string tempFileName; // device.cpp
 static std::string editorCompiled;
 
 static std::string newTempFileName();
@@ -57,8 +57,6 @@ void codeRenderToolbar()
 {
     if (ImGui::Button("Compile"))
         compileEditorCode();
-    ImGui::SameLine();
-    ImGui::Button("Upload");
 }
 
 void codeRenderWidgets()
