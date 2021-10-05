@@ -9,6 +9,16 @@
  * If not, see <https://www.gnu.org/licenses/>.
  */
 
+/**
+ * TODO list:
+ * - Test loading the signal generator with a formula.
+ * - Improve signal generator audio streaming.
+ * - Decide how to handle drawing samples at 96kS/s.
+ *    - May not be possible: USB streaming maxing out at ~80kS/s (1.25MB/s)
+ * - Draw input samples
+ * - Log samples
+ */
+
 #include "stmdsp.hpp"
 
 #include "imgui.h"
@@ -46,14 +56,6 @@ static const unsigned int sampleRateInts[6] = {
     48'000,
     96'000
 };
-static const unsigned int sampleRateBSizes[6] = {
-    8000,
-    16000,
-    20000,
-    32000,
-    48000,
-    96000,
-};
 
 static bool measureCodeTime = false;
 static bool drawSamples = false;
@@ -68,12 +70,13 @@ static bool popupRequestLog = false;
 
 static std::mutex mutexDrawSamples;
 //static std::vector<stmdsp::dacsample_t> drawSamplesBuf;
-//static std::vector<stmdsp::dacsample_t> drawSamplesBuf2;
+static std::vector<stmdsp::dacsample_t> drawSamplesBuf2;
 static std::ofstream logSamplesFile;
 static wav::clip wavOutput;
 
 static std::deque<stmdsp::dacsample_t> drawSamplesQueue;
-static unsigned int drawSamplesBufferSize = 4096;
+static double drawSamplesTimeframe = 1.0; // seconds
+static unsigned int drawSamplesBufferSize = 1;
 
 static void measureCodeTask(stmdsp::device *device)
 {
@@ -345,6 +348,22 @@ void deviceRenderDraw()
     if (popupRequestDraw) {
         ImGui::Begin("draw", &popupRequestDraw);
         ImGui::Checkbox("Draw input", &drawSamplesInput);
+        ImGui::SameLine();
+        ImGui::Text("|  time: %0.3f sec", drawSamplesTimeframe);
+        ImGui::SameLine();
+        if (ImGui::Button("-", {30, 0})) {
+            drawSamplesTimeframe = std::max(drawSamplesTimeframe - 0.25, 0.5);
+            auto sr = sampleRateInts[m_device->get_sample_rate()];
+            auto tf = drawSamplesTimeframe;
+            drawSamplesBufferSize = std::round(sr * tf);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("+", {30, 0})) {
+            drawSamplesTimeframe = std::min(drawSamplesTimeframe + 0.25, 30.);
+            auto sr = sampleRateInts[m_device->get_sample_rate()];
+            auto tf = drawSamplesTimeframe;
+            drawSamplesBufferSize = std::round(sr * tf);
+        }
 
         static std::vector<stmdsp::dacsample_t> buffer;
         static decltype(buffer.begin()) bufferCursor;
@@ -423,11 +442,6 @@ void deviceRenderMenu()
             deviceStart();
         }
 
-/**
-TODO test siggen formula
-TODO improve siggen audio streaming
-TODO draw: smoothly chain captures for 96kHz
- */
         if (ImGui::MenuItem("Upload algorithm", nullptr, false, isConnected))
             deviceAlgorithmUpload();
         if (ImGui::MenuItem("Unload algorithm", nullptr, false, isConnected))
@@ -503,7 +517,7 @@ void deviceRenderToolbar()
                         std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     } while (m_device->get_sample_rate() != i);
 
-                    drawSamplesBufferSize = sampleRateBSizes[i];
+                    drawSamplesBufferSize = std::round(sampleRateInts[i] * drawSamplesTimeframe);
                 }
             }
         }
@@ -520,7 +534,7 @@ void deviceConnect()
             if (m_device->connected()) {
                 auto sri = m_device->get_sample_rate();
                 sampleRatePreview = sampleRateList[sri];
-                drawSamplesBufferSize = sampleRateBSizes[sri];
+                drawSamplesBufferSize = std::round(sampleRateInts[sri] * drawSamplesTimeframe);
                 log("Connected!");
             } else {
                 delete m_device;

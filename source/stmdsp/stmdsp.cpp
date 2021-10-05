@@ -30,18 +30,18 @@ namespace stmdsp
         m_serial(file, 8'000'000/*230400*/, serial::Timeout::simpleTimeout(50))
     {
         if (m_serial.isOpen()) {
-		   m_serial.flush();
-           m_serial.write("i");
-           if (auto id = m_serial.read(7); id.starts_with("stmdsp")) {
+            m_serial.flush();
+            m_serial.write("i");
+            if (auto id = m_serial.read(7); id.starts_with("stmdsp")) {
                 if (id.back() == 'h')
                     m_platform = platform::H7;
                 else if (id.back() == 'l')
                     m_platform = platform::L4;
                 else
                     m_serial.close();
-           } else {
-               m_serial.close();
-           }
+            } else {
+                m_serial.close();
+            }
         }
     }
 
@@ -69,17 +69,18 @@ namespace stmdsp
     }
 
     unsigned int device::get_sample_rate() {
-        unsigned char result = 0xFF;
-
-        if (connected()) {
+        if (connected() && !is_running()) {
             uint8_t request[2] = {
                 'r', 0xFF
             };
             m_serial.write(request, 2);
+
+            unsigned char result = 0xFF;
             m_serial.read(&result, 1);
+            m_sample_rate = result;
         }
 
-        return result;
+        return m_sample_rate;
     }
 
     void device::continuous_start() {

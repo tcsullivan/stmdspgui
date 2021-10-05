@@ -90,6 +90,7 @@ namespace stmdsp
         serial::Serial m_serial;
         platform m_platform = platform::Unknown;
         unsigned int m_buffer_size = SAMPLES_MAX;
+        unsigned int m_sample_rate = 0;
         bool m_is_siggening = false;
         bool m_is_running = false;
     };
