@@ -16,6 +16,9 @@
 #include "wav.hpp"
 
 #include <charconv>
+#include <cmath>
+#include <cstdio>
+#include <deque>
 #include <fstream>
 #include <mutex>
 #include <thread>
@@ -43,6 +46,14 @@ static const unsigned int sampleRateInts[6] = {
     48'000,
     96'000
 };
+static const unsigned int sampleRateBSizes[6] = {
+    8000,
+    16000,
+    20000,
+    32000,
+    48000,
+    96000,
+};
 
 static bool measureCodeTime = false;
 static bool drawSamples = false;
@@ -56,10 +67,13 @@ static bool popupRequestDraw = false;
 static bool popupRequestLog = false;
 
 static std::mutex mutexDrawSamples;
-static std::vector<stmdsp::dacsample_t> drawSamplesBuf;
-static std::vector<stmdsp::dacsample_t> drawSamplesBuf2;
+//static std::vector<stmdsp::dacsample_t> drawSamplesBuf;
+//static std::vector<stmdsp::dacsample_t> drawSamplesBuf2;
 static std::ofstream logSamplesFile;
 static wav::clip wavOutput;
+
+static std::deque<stmdsp::dacsample_t> drawSamplesQueue;
+static unsigned int drawSamplesBufferSize = 4096;
 
 static void measureCodeTask(stmdsp::device *device)
 {
@@ -77,28 +91,94 @@ static void drawSamplesTask(stmdsp::device *device)
 
     const bool doLogger = logResults && logSamplesFile.good();
 
-    const auto bsize = m_device->get_buffer_size();
-    const float srate = sampleRateInts[m_device->get_sample_rate()];
-    const unsigned int delay = bsize / srate * 1000.f * 0.5f;
+    const double bufferSize = m_device->get_buffer_size();
+    const double sampleRate = sampleRateInts[m_device->get_sample_rate()];
+    double samplesToPush = sampleRate * 0.0007 * 2;
 
-    while (m_device->is_running()) {
-        {
-            std::scoped_lock lock (mutexDrawSamples);
-            drawSamplesBuf = m_device->continuous_read();
-            if (drawSamplesInput && popupRequestDraw)
-                drawSamplesBuf2 = m_device->continuous_read_input();
+    std::vector<stmdsp::dacsample_t> lastReadBuffer (bufferSize, 2048);
+    double lastReadIndexD = 0;
+    double desiredTime = bufferSize / sampleRate * 1.01;
+
+    auto bufferTime = std::chrono::high_resolution_clock::now();
+    while (m_device && m_device->is_running()) {
+        if (samplesToPush < bufferSize) {
+            if (lastReadIndexD >= bufferSize - 1)
+                lastReadIndexD -= bufferSize - 1;
+
+            unsigned int lastReadIndex = std::floor(lastReadIndexD);
+            unsigned int end = lastReadIndexD + samplesToPush;
+
+            {
+                std::scoped_lock lock (mutexDrawSamples);
+                for (; lastReadIndexD < end; lastReadIndexD += 1) {
+                    if (lastReadIndex >= lastReadBuffer.size()) {
+                        auto old = samplesToPush;
+
+                        auto now = std::chrono::high_resolution_clock::now();
+                        std::chrono::duration<double> diff = now - bufferTime;
+
+                        lastReadBuffer = m_device->continuous_read();
+                        if (drawSamplesInput && popupRequestDraw)
+                            drawSamplesBuf2 = m_device->continuous_read_input();
+                        if (lastReadBuffer.empty()) {
+                            do {
+                                std::this_thread::sleep_for(std::chrono::microseconds(2));
+                                lastReadBuffer = m_device->continuous_read();
+                            } while (lastReadBuffer.empty() && m_device->is_running());
+                        }
+
+                        bufferTime = now;
+
+                        if (double c = diff.count(); c > desiredTime + 0.001) {
+                            // Too slow
+                            samplesToPush = (samplesToPush * c / desiredTime) * 0.98;
+                            if (samplesToPush > bufferSize)
+                                samplesToPush = bufferSize;
+                        } else if (c < desiredTime - 0.001) {
+                            // Too fast
+                            samplesToPush = (samplesToPush * c / desiredTime) * 0.98;
+                        }
+
+                        lastReadIndex = 0;
+                    }
+
+                    drawSamplesQueue.push_back(lastReadBuffer[lastReadIndex++]);
+                }
+            }
+
+            std::this_thread::sleep_for(std::chrono::microseconds(700));
+        }
+        // Full blast
+        else {
+            lastReadBuffer = m_device->continuous_read();
+            while (lastReadBuffer.empty() && m_device->is_running()) {
+                std::this_thread::sleep_for(std::chrono::microseconds(1));
+                lastReadBuffer = m_device->continuous_read();
+            }
+
+            {
+                std::scoped_lock lock (mutexDrawSamples);
+                for (const auto& s : lastReadBuffer)
+                    drawSamplesQueue.push_back(s);
+            }
+
+            auto now = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> diff = now - bufferTime;
+            bufferTime = now;
+
+            double c = diff.count();
+            if (c < desiredTime) {
+                samplesToPush = (samplesToPush * c / desiredTime) * 0.98;
+            }
+
+            std::this_thread::sleep_for(std::chrono::microseconds(10));
         }
 
-        if (doLogger) {
-            for (const auto& s : drawSamplesBuf)
-                logSamplesFile << s << '\n';
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+        //if (doLogger) {
+        //    for (const auto& s : drawSamplesBuf)
+        //        logSamplesFile << s << '\n';
+        //}
     }
-
-    std::fill(drawSamplesBuf.begin(), drawSamplesBuf.end(), 2048);
-    std::fill(drawSamplesBuf2.begin(), drawSamplesBuf2.end(), 2048);
 }
 
 static void feedSigGenTask(stmdsp::device *device)
@@ -264,34 +344,62 @@ void deviceRenderDraw()
 {
     if (popupRequestDraw) {
         ImGui::Begin("draw", &popupRequestDraw);
-            ImGui::Checkbox("Draw input", &drawSamplesInput);
-            {
-                std::scoped_lock lock (mutexDrawSamples);
-                auto drawList = ImGui::GetWindowDrawList();
-                const ImVec2 p0 = ImGui::GetWindowPos();
-                const auto size = ImGui::GetWindowSize();
-                //ImVec2 p1 (p0.x + size.x, p0.y + size.y);
-                //ImU32 col_a = ImGui::GetColorU32(IM_COL32(0, 0, 0, 255));
-                //ImU32 col_b = ImGui::GetColorU32(IM_COL32(255, 255, 255, 255));
-                //drawList->AddRectFilledMultiColor(p0, p1, col_a, col_b, col_b, col_a);
+        ImGui::Checkbox("Draw input", &drawSamplesInput);
 
-                const unsigned int didx = 1.f / (size.x / static_cast<float>(drawSamplesBuf.size()));
-                ImVec2 pp = p0;
-                for (auto i = 0u; i < drawSamplesBuf.size(); i += didx) {
-                    ImVec2 next (pp.x + 1, p0.y + (float)drawSamplesBuf[i] / 4095.f * size.y);
-                    drawList->AddLine(pp, next, ImGui::GetColorU32(IM_COL32(128, 0, 0, 255)));
-                    pp = next;
-                }
+        static std::vector<stmdsp::dacsample_t> buffer;
+        static decltype(buffer.begin()) bufferCursor;
+        static long unsigned int drawChunkSize = 0;
+        static std::chrono::time_point<std::chrono::high_resolution_clock> timee;
 
-                if (drawSamplesInput) {
-                    pp = p0;
-                    for (auto i = 0u; i < drawSamplesBuf2.size(); i += didx) {
-                        ImVec2 next (pp.x + 1, p0.y + (float)drawSamplesBuf2[i] / 4095.f * size.y);
-                        drawList->AddLine(pp, next, ImGui::GetColorU32(IM_COL32(0, 0, 128, 255)));
-                        pp = next;
-                    }
+        if (buffer.size() != drawSamplesBufferSize) {
+            buffer.resize(drawSamplesBufferSize);
+            bufferCursor = buffer.begin();
+        }
+
+        {
+            std::scoped_lock lock (mutexDrawSamples);
+            auto qsize = drawSamplesQueue.size();
+            auto count = qsize;//std::min(qsize, drawChunkSize);
+            //if (count > 0)
+            //    printf("draw: %9llu/%9lu\n", qsize, count);
+            for (auto i = count; i; --i) {
+                *bufferCursor = drawSamplesQueue.front();
+                drawSamplesQueue.pop_front();
+                if (++bufferCursor == buffer.end()) {
+                    bufferCursor = buffer.begin();
+        
+                    //auto now = std::chrono::high_resolution_clock::now();
+                    //std::chrono::duration<double> diff = now - timee;
+                    //timee = now;
+                    //printf("\rtime: %.9lf", diff);
+                    //fflush(stdout);
                 }
             }
+        }
+
+        auto drawList = ImGui::GetWindowDrawList();
+        ImVec2 p0 = ImGui::GetWindowPos();
+        auto size = ImGui::GetWindowSize();
+        p0.y += 65;
+        size.y -= 70;
+        drawList->AddRectFilled(p0, {p0.x + size.x, p0.y + size.y}, IM_COL32(0, 0, 0, 255));
+
+        const unsigned int didx = 1.f / (size.x / static_cast<float>(buffer.size()));
+        ImVec2 pp = p0;
+        for (auto i = 0u; i < buffer.size(); i += didx) {
+            ImVec2 next (pp.x + 1, p0.y + size.y - (float)buffer[i] / 4095.f * size.y);
+            drawList->AddLine(pp, next, ImGui::GetColorU32(IM_COL32(255, 0, 0, 255)));
+            pp = next;
+        }
+
+        if (drawSamplesInput) {
+            pp = p0;
+            for (auto i = 0u; i < drawSamplesBuf2.size(); i += didx) {
+                ImVec2 next (pp.x + 1, p0.y + size.y - (float)buffer[i] / 4095.f * size.y);
+                drawList->AddLine(pp, next, ImGui::GetColorU32(IM_COL32(0, 0, 255, 255)));
+                pp = next;
+            }
+        }
         ImGui::End();
     }
 }
@@ -304,21 +412,21 @@ void deviceRenderMenu()
 
         static const char *connectLabel = "Connect";
         if (ImGui::MenuItem(connectLabel)) {
+            connectLabel = isConnected ? "Connect" : "Disconnect";
             deviceConnect();
-            connectLabel = isConnected ? "Disconnect" : "Connect";
         }
 
         ImGui::Separator();
         static const char *startLabel = "Start";
         if (ImGui::MenuItem(startLabel, nullptr, false, isConnected)) {
+            startLabel = isRunning ? "Start" : "Stop";
             deviceStart();
-            startLabel = isRunning ? "Stop" : "Start";
         }
 
 /**
 TODO test siggen formula
 TODO improve siggen audio streaming
-TODO draw: smoothly chain captures
+TODO draw: smoothly chain captures for 96kHz
  */
         if (ImGui::MenuItem("Upload algorithm", nullptr, false, isConnected))
             deviceAlgorithmUpload();
@@ -389,8 +497,14 @@ void deviceRenderToolbar()
         for (int i = 0; i < 6; ++i) {
             if (ImGui::Selectable(sampleRateList[i])) {
                 sampleRatePreview = sampleRateList[i];
-                if (m_device != nullptr && !m_device->is_running())
-                    m_device->set_sample_rate(i);
+                if (m_device != nullptr && !m_device->is_running()) {
+                    do {
+                        m_device->set_sample_rate(i);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    } while (m_device->get_sample_rate() != i);
+
+                    drawSamplesBufferSize = sampleRateBSizes[i];
+                }
             }
         }
         ImGui::EndCombo();
@@ -404,7 +518,9 @@ void deviceConnect()
         if (auto devices = scanner.scan(); devices.size() > 0) {
             m_device = new stmdsp::device(devices.front());
             if (m_device->connected()) {
-                sampleRatePreview = sampleRateList[m_device->get_sample_rate()];
+                auto sri = m_device->get_sample_rate();
+                sampleRatePreview = sampleRateList[sri];
+                drawSamplesBufferSize = sampleRateBSizes[sri];
                 log("Connected!");
             } else {
                 delete m_device;
@@ -429,7 +545,11 @@ void deviceStart()
     }
 
     if (m_device->is_running()) {
-        m_device->continuous_stop();
+        {
+            std::scoped_lock lock (mutexDrawSamples);
+            std::this_thread::sleep_for(std::chrono::microseconds(150));
+            m_device->continuous_stop();
+        }
         if (logResults) {
             logSamplesFile.close();
             logResults = false;

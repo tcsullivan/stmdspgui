@@ -19,7 +19,6 @@
 
 #include <string>
 
-// Externs
 extern ImFont *fontSans;
 extern ImFont *fontMono;
 
