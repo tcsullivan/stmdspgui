@@ -17,7 +17,10 @@
 #include "logview.h"
 #include "stmdsp.hpp"
 
+#include <chrono>
+#include <cmath>
 #include <string>
+#include <thread>
 
 extern ImFont *fontSans;
 extern ImFont *fontMono;
@@ -61,6 +64,9 @@ int main(int, char **)
     codeEditorInit();
 
     while (!done) {
+        auto endTime = std::chrono::steady_clock::now() +
+            std::chrono::milliseconds(static_cast<unsigned int>(std::floor(1000. / 60.)));
+
         guiHandleEvents(done);
 
         // Start the new window frame and render the menu bar.
@@ -107,6 +113,8 @@ int main(int, char **)
         guiRender([] {
             ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
         });
+
+        std::this_thread::sleep_until(endTime);
     }
 
     guiShutdown();

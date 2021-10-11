@@ -13,10 +13,7 @@
  * TODO list:
  * - Test loading the signal generator with a formula.
  * - Improve signal generator audio streaming.
- * - Decide how to handle drawing samples at 96kS/s.
- *    - May not be possible: USB streaming maxing out at ~80kS/s (1.25MB/s)
- * - Draw input samples
- * - Log samples
+ * - Log samples (should be good..?)
  */
 
 #include "stmdsp.hpp"
@@ -76,6 +73,7 @@ static std::ofstream logSamplesFile;
 static wav::clip wavOutput;
 
 static std::deque<stmdsp::dacsample_t> drawSamplesQueue;
+static std::deque<stmdsp::dacsample_t> drawSamplesInputQueue;
 static double drawSamplesTimeframe = 1.0; // seconds
 static unsigned int drawSamplesBufferSize = 1;
 
@@ -97,100 +95,46 @@ static void drawSamplesTask(stmdsp::device *device)
 
     const double bufferSize = m_device->get_buffer_size();
     const double sampleRate = sampleRateInts[m_device->get_sample_rate()];
-    double samplesToPush = sampleRate * 0.0007 * 2;
+    unsigned long bufferTime = bufferSize / sampleRate * 0.975 * 1e6;
 
-    std::vector<stmdsp::dacsample_t> lastReadBuffer (bufferSize, 2048);
-    double lastReadIndexD = 0;
-    double desiredTime = bufferSize / sampleRate * 1.01;
-
-    auto bufferTime = std::chrono::high_resolution_clock::now();
     while (m_device && m_device->is_running()) {
-        if (samplesToPush < bufferSize || drawSamplesTimeframe < 0.25) {
-            if (lastReadIndexD >= bufferSize - 1)
-                lastReadIndexD -= bufferSize - 1;
+        auto next = std::chrono::high_resolution_clock::now() +
+                    std::chrono::microseconds(bufferTime);
 
-            unsigned int lastReadIndex = std::floor(lastReadIndexD);
-            unsigned int end = lastReadIndexD + samplesToPush;
-
-            {
-                std::scoped_lock lock (mutexDrawSamples);
-                for (; lastReadIndexD < end; lastReadIndexD += 1) {
-                    if (lastReadIndex >= lastReadBuffer.size()) {
-                        //auto old = samplesToPush;
-
-                        auto now = std::chrono::high_resolution_clock::now();
-                        std::chrono::duration<double> diff = now - bufferTime;
-
-                        lastReadBuffer = m_device->continuous_read();
-                        if (drawSamplesInput && popupRequestDraw)
-                            drawSamplesBuf2 = m_device->continuous_read_input();
-                        if (lastReadBuffer.empty()) {
-                            do {
-                                std::this_thread::sleep_for(std::chrono::microseconds(20));
-                                lastReadBuffer = m_device->continuous_read();
-                            } while (lastReadBuffer.empty() && m_device->is_running());
-                        }
-
-                        bufferTime = now;
-
-                        if (double c = diff.count(); c > desiredTime + 0.001) {
-                            // Too slow
-                            samplesToPush = (samplesToPush * c / desiredTime) * 0.98;
-                            if (samplesToPush > bufferSize)
-                                samplesToPush = bufferSize;
-                        } else if (c < desiredTime - 0.001) {
-                            // Too fast
-                            samplesToPush = (samplesToPush * c / desiredTime) * 0.98;
-                        }
-
-                        //if (std::abs(old - samplesToPush) > 4) {
-                        //    printf("\r%0.2lf", samplesToPush);
-                        //    fflush(stdout);
-                        //}
-
-                        lastReadIndex = 0;
-                    }
-
-                    drawSamplesQueue.push_back(lastReadBuffer[lastReadIndex++]);
-                }
-            }
-
-            std::this_thread::sleep_for(std::chrono::microseconds(700));
+        auto chunk = m_device->continuous_read();
+        while (chunk.empty() && m_device->is_running()) {
+            std::this_thread::sleep_for(std::chrono::microseconds(20));
+            chunk = m_device->continuous_read();
         }
-        // Full blast
-        else {
-            lastReadBuffer = m_device->continuous_read();
-            while (lastReadBuffer.empty() && m_device->is_running()) {
-                std::this_thread::sleep_for(std::chrono::microseconds(1));
-                lastReadBuffer = m_device->continuous_read();
+
+        if (drawSamplesInput && popupRequestDraw) {
+            auto chunk2 = m_device->continuous_read_input();
+            while (chunk2.empty() && m_device->is_running()) {
+                std::this_thread::sleep_for(std::chrono::microseconds(20));
+                chunk2 = m_device->continuous_read_input();
             }
 
             {
                 std::scoped_lock lock (mutexDrawSamples);
-                for (const auto& s : lastReadBuffer)
+                auto i = chunk2.cbegin();
+                for (const auto& s : chunk) {
                     drawSamplesQueue.push_back(s);
-            }
-
-            auto now = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> diff = now - bufferTime;
-            bufferTime = now;
-
-            if (drawSamplesTimeframe >= 0.25) {
-                double c = diff.count();
-                if (c < desiredTime) {
-                    samplesToPush = (samplesToPush * c / desiredTime) * 0.98;
+                    drawSamplesInputQueue.push_back(*i++);
                 }
-
-                std::this_thread::sleep_for(std::chrono::microseconds(10));
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            }
+        } else if (!doLogger) {
+            std::scoped_lock lock (mutexDrawSamples);
+            for (const auto& s : chunk)
+                drawSamplesQueue.push_back(s);
+        } else {
+            std::scoped_lock lock (mutexDrawSamples);
+            for (const auto& s : chunk) {
+                drawSamplesQueue.push_back(s);
+                logSamplesFile << s << '\n';
             }
         }
-
-        //if (doLogger) {
-        //    for (const auto& s : drawSamplesBuf)
-        //        logSamplesFile << s << '\n';
-        //}
+        
+        std::this_thread::sleep_until(next);
     }
 }
 
@@ -358,9 +302,9 @@ void deviceRenderDraw()
     if (popupRequestDraw) {
         static std::vector<stmdsp::dacsample_t> buffer;
         static decltype(buffer.begin()) bufferCursor;
+        static std::vector<stmdsp::dacsample_t> bufferInput;
+        static decltype(bufferInput.begin()) bufferInputCursor;
         static unsigned int yMinMax = 4095;
-        //static long unsigned int drawChunkSize = 0;
-        //static std::chrono::time_point<std::chrono::high_resolution_clock> timee;
 
         ImGui::Begin("draw", &popupRequestDraw);
         ImGui::Text("Draw input ");
@@ -393,28 +337,32 @@ void deviceRenderDraw()
             yMinMax = std::min(4095u, (yMinMax << 1) | 1);
         }
 
+        static unsigned long csize = 0;
         if (buffer.size() != drawSamplesBufferSize) {
             buffer.resize(drawSamplesBufferSize);
+            bufferInput.resize(drawSamplesBufferSize);
             bufferCursor = buffer.begin();
+            bufferInputCursor = bufferInput.begin();
+            csize = drawSamplesBufferSize / (60. * drawSamplesTimeframe) * 1.025;
         }
 
         {
             std::scoped_lock lock (mutexDrawSamples);
-            auto qsize = drawSamplesQueue.size();
-            auto count = qsize;//std::min(qsize, drawChunkSize);
-            //if (count > 0)
-            //    printf("draw: %9llu/%9lu\n", qsize, count);
+            auto count = std::min(drawSamplesQueue.size(), csize);
             for (auto i = count; i; --i) {
                 *bufferCursor = drawSamplesQueue.front();
                 drawSamplesQueue.pop_front();
-                if (++bufferCursor == buffer.end()) {
+                if (++bufferCursor == buffer.end())
                     bufferCursor = buffer.begin();
-        
-                    //auto now = std::chrono::high_resolution_clock::now();
-                    //std::chrono::duration<double> diff = now - timee;
-                    //timee = now;
-                    //printf("\rtime: %.9lf", diff);
-                    //fflush(stdout);
+            }
+            
+            if (drawSamplesInput) {
+                auto count = std::min(drawSamplesInputQueue.size(), csize);
+                for (auto i = count; i; --i) {
+                    *bufferInputCursor = drawSamplesInputQueue.front();
+                    drawSamplesInputQueue.pop_front();
+                    if (++bufferInputCursor == bufferInput.end())
+                        bufferInputCursor = bufferInput.begin();
                 }
             }
         }
@@ -428,7 +376,7 @@ void deviceRenderDraw()
 
         const float di = static_cast<float>(buffer.size()) / size.x;
         const float dx = std::ceil(size.x / static_cast<float>(buffer.size()));
-        ImVec2 pp =    p0;
+        ImVec2 pp = p0;
         float i = 0;
         while (pp.x < p0.x + size.x) {
             unsigned int idx = i;
@@ -440,27 +388,20 @@ void deviceRenderDraw()
             pp = next;
         }
 
-        //const unsigned int didx = std::ceil(1.f / (size.x / static_cast<float>(buffer.size())));
-        //const auto dx = size.x / buffer.size();
-        //ImVec2 pp = p0;
-        //for (auto i = 0u; i < buffer.size(); i += didx) {
-        //    float n = std::clamp((buffer[i] - 2048.) / yMinMax, -0.5, 0.5);
+        if (drawSamplesInput) {
+            ImVec2 pp = p0;
+            float i = 0;
+            while (pp.x < p0.x + size.x) {
+                unsigned int idx = i;
+                float n = std::clamp((bufferInput[idx] - 2048.) / yMinMax, -0.5, 0.5);
+                i += di;
 
-        //    ImVec2 next (pp.x + 1, p0.y + size.y * (0.5 - n));
-        //    drawList->AddLine(pp, next, ImGui::GetColorU32(IM_COL32(255, 0, 0, 255)));
-        //    pp = next;
-        //}
+                ImVec2 next (pp.x + dx, p0.y + size.y * (0.5 - n));
+                drawList->AddLine(pp, next, ImGui::GetColorU32(IM_COL32(0, 0, 255, 255)));
+                pp = next;
+            }
+        }
 
-        //if (drawSamplesInput) {
-        //    pp = p0;
-        //    for (auto i = 0u; i < drawSamplesBuf2.size(); i += didx) {
-        //        ImVec2 next (pp.x + 1,
-        //            p0.y + size.y -
-        //                (static_cast<float>(buffer[i]) / yMinMax) * size.y);
-        //        drawList->AddLine(pp, next, ImGui::GetColorU32(IM_COL32(0, 0, 255, 255)));
-        //        pp = next;
-        //    }
-        //}
         ImGui::End();
     }
 }
@@ -550,7 +491,7 @@ void deviceRenderToolbar()
     ImGui::SameLine();
     ImGui::SetNextItemWidth(100);
     if (ImGui::BeginCombo("", sampleRatePreview)) {
-        for (int i = 0; i < sampleRateList.size() - 1; ++i) {
+        for (int i = 0; i < sampleRateList.size(); ++i) {
             if (ImGui::Selectable(sampleRateList[i])) {
                 sampleRatePreview = sampleRateList[i];
                 if (m_device != nullptr && !m_device->is_running()) {

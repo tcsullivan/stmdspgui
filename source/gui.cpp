@@ -26,7 +26,7 @@ static decltype(SDL_GL_CreateContext(nullptr)) gl_context;
 
 bool guiInitialize()
 {
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+    if (SDL_Init(/*SDL_INIT_VIDEO*/0) != 0) {
         printf("Error: %s\n", SDL_GetError());
         return false;
     }
