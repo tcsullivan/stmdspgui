@@ -122,7 +122,10 @@ void fileRenderMenu()
 
 void fileRenderDialog()
 {
-    if (ImGuiFileDialog::Instance()->Display("ChooseFileOpenSave")) {
+    if (ImGuiFileDialog::Instance()->Display("ChooseFileOpenSave",
+                                             ImGuiWindowFlags_NoCollapse,
+                                             ImVec2(460, 540)))
+    {
         if (ImGuiFileDialog::Instance()->IsOk()) {
             std::string filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
 

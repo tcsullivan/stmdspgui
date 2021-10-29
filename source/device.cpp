@@ -11,9 +11,7 @@
 
 /**
  * TODO list:
- * - Test loading the signal generator with a formula.
  * - Improve signal generator audio streaming.
- * - Log samples (should be good..?)
  */
 
 #include "stmdsp.hpp"
@@ -25,9 +23,9 @@
 #include <array>
 #include <charconv>
 #include <cmath>
-#include <cstdio>
 #include <deque>
 #include <fstream>
+#include <iostream>
 #include <mutex>
 #include <thread>
 
@@ -66,9 +64,9 @@ static bool popupRequestSiggen = false;
 static bool popupRequestDraw = false;
 static bool popupRequestLog = false;
 
-static std::mutex mutexDrawSamples;
-//static std::vector<stmdsp::dacsample_t> drawSamplesBuf;
-static std::vector<stmdsp::dacsample_t> drawSamplesBuf2;
+static std::timed_mutex mutexDrawSamples;
+static std::timed_mutex mutexDeviceLoad;
+
 static std::ofstream logSamplesFile;
 static wav::clip wavOutput;
 
@@ -97,41 +95,64 @@ static void drawSamplesTask(stmdsp::device *device)
     const double sampleRate = sampleRateInts[m_device->get_sample_rate()];
     unsigned long bufferTime = bufferSize / sampleRate * 0.975 * 1e6;
 
+    std::unique_lock<std::timed_mutex> lockDraw (mutexDrawSamples, std::defer_lock);
+    std::unique_lock<std::timed_mutex> lockDevice (mutexDeviceLoad, std::defer_lock);
+
     while (m_device && m_device->is_running()) {
         auto next = std::chrono::high_resolution_clock::now() +
                     std::chrono::microseconds(bufferTime);
 
-        auto chunk = m_device->continuous_read();
-        while (chunk.empty() && m_device->is_running()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(20));
+        std::vector<stmdsp::dacsample_t> chunk;
+
+	if (lockDevice.try_lock_until(next)) {
             chunk = m_device->continuous_read();
-        }
+            int tries = -1;
+            while (chunk.empty() && m_device->is_running()) {
+                if (++tries == 100)
+                    break;
+                std::this_thread::sleep_for(std::chrono::microseconds(20));
+                chunk = m_device->continuous_read();
+            }
+	    lockDevice.unlock();
+	} else {
+            // Cooldown.
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+	}
 
         if (drawSamplesInput && popupRequestDraw) {
-            auto chunk2 = m_device->continuous_read_input();
-            while (chunk2.empty() && m_device->is_running()) {
-                std::this_thread::sleep_for(std::chrono::microseconds(20));
+            std::vector<stmdsp::dacsample_t> chunk2;
+
+	    if (lockDevice.try_lock_for(std::chrono::milliseconds(1))) {
                 chunk2 = m_device->continuous_read_input();
+                int tries = -1;
+                while (chunk2.empty() && m_device->is_running()) {
+                    if (++tries == 100)
+                        break;
+                    std::this_thread::sleep_for(std::chrono::microseconds(20));
+                    chunk2 = m_device->continuous_read_input();
+                }
+	        lockDevice.unlock();
             }
 
-            {
-                std::scoped_lock lock (mutexDrawSamples);
-                auto i = chunk2.cbegin();
-                for (const auto& s : chunk) {
-                    drawSamplesQueue.push_back(s);
-                    drawSamplesInputQueue.push_back(*i++);
-                }
+	    lockDraw.lock();
+            auto i = chunk2.cbegin();
+            for (const auto& s : chunk) {
+                drawSamplesQueue.push_back(s);
+                drawSamplesInputQueue.push_back(*i++);
             }
+	    lockDraw.unlock();
         } else if (!doLogger) {
-            std::scoped_lock lock (mutexDrawSamples);
+	    lockDraw.lock();
             for (const auto& s : chunk)
                 drawSamplesQueue.push_back(s);
+	    lockDraw.unlock();
         } else {
-            std::scoped_lock lock (mutexDrawSamples);
+	    lockDraw.lock();
             for (const auto& s : chunk) {
                 drawSamplesQueue.push_back(s);
                 logSamplesFile << s << '\n';
             }
+	    lockDraw.unlock();
         }
         
         std::this_thread::sleep_until(next);
@@ -143,33 +164,37 @@ static void feedSigGenTask(stmdsp::device *device)
     if (device == nullptr)
         return;
 
-    const auto bsize = m_device->get_buffer_size();
-    const float srate = sampleRateInts[m_device->get_sample_rate()];
-    const unsigned int delay = bsize / srate * 1000.f * 0.4f;
+    const auto bufferSize = m_device->get_buffer_size();
+    const double sampleRate = sampleRateInts[m_device->get_sample_rate()];
+    const unsigned long delay = bufferSize / sampleRate * 0.975 * 1e6;
 
-    auto wavBuf = new stmdsp::adcsample_t[bsize];
+    std::vector<stmdsp::adcsample_t> wavBuf (bufferSize, 2048);
 
-    {
-        auto dst = wavBuf;
-        auto src = reinterpret_cast<uint16_t *>(wavOutput.next(bsize));
-        for (auto i = 0u; i < bsize; ++i)
-            *dst++ = *src++ / 16 + 2048;
-        m_device->siggen_upload(wavBuf, bsize);
-    }
+    std::unique_lock<std::timed_mutex> lockDevice (mutexDeviceLoad, std::defer_lock);
 
-    m_device->siggen_start();
+    lockDevice.lock();
+    // One (or both) of these freezes the device...
+    m_device->siggen_upload(wavBuf.data(), wavBuf.size());
+    //m_device->siggen_start();
+    lockDevice.unlock();
 
+    std::this_thread::sleep_for(std::chrono::microseconds(delay));
+
+    return;
     while (genRunning) {
-        auto dst = wavBuf;
-        auto src = reinterpret_cast<uint16_t *>(wavOutput.next(bsize));
-        for (auto i = 0u; i < bsize; ++i)
-            *dst++ = *src++ / 16 + 2048;
-        m_device->siggen_upload(wavBuf, bsize);
+        auto next = std::chrono::high_resolution_clock::now() +
+                    std::chrono::microseconds(delay);
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+        auto src = reinterpret_cast<uint16_t *>(wavOutput.next(bufferSize));
+        for (auto& w : wavBuf)
+            w = *src++ / 16 + 2048;
+
+        if (lockDevice.try_lock_until(next)) {
+            m_device->siggen_upload(wavBuf.data(), wavBuf.size());
+	    lockDevice.unlock();
+            std::this_thread::sleep_until(next);
+        }
     }
-
-    delete[] wavBuf;
 }
 
 static void deviceConnect();
@@ -273,7 +298,10 @@ void deviceRenderWidgets()
         ImGui::EndPopup();
     }
 
-    if (ImGuiFileDialog::Instance()->Display("ChooseFileLogGen")) {
+    if (ImGuiFileDialog::Instance()->Display("ChooseFileLogGen",
+                                             ImGuiWindowFlags_NoCollapse,
+                                             ImVec2(460, 540)))
+    {
         if (ImGuiFileDialog::Instance()->IsOk()) {
             auto filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
             auto ext = filePathName.substr(filePathName.size() - 4);
@@ -291,9 +319,9 @@ void deviceRenderWidgets()
                 if (logSamplesFile.good())
                     log("Log file ready.");
             }
-
-            ImGuiFileDialog::Instance()->Close();
         }
+
+        ImGuiFileDialog::Instance()->Close();
     }
 }
 
@@ -513,16 +541,23 @@ void deviceConnect()
     if (m_device == nullptr) {
         stmdsp::scanner scanner;
         if (auto devices = scanner.scan(); devices.size() > 0) {
-            m_device = new stmdsp::device(devices.front());
-            if (m_device->connected()) {
-                auto sri = m_device->get_sample_rate();
-                sampleRatePreview = sampleRateList[sri];
-                drawSamplesBufferSize = std::round(sampleRateInts[sri] * drawSamplesTimeframe);
-                log("Connected!");
-            } else {
-                delete m_device;
-                m_device = nullptr;
-                log("Failed to connect.");
+            try {
+                m_device = new stmdsp::device(devices.front());
+            } catch (...) {
+                log("Failed to connect (check permissions?).");
+		m_device = nullptr;
+            }
+            if (m_device != nullptr) {
+                if (m_device->connected()) {
+                    auto sri = m_device->get_sample_rate();
+                    sampleRatePreview = sampleRateList[sri];
+                    drawSamplesBufferSize = std::round(sampleRateInts[sri] * drawSamplesTimeframe);
+                    log("Connected!");
+                } else {
+                    delete m_device;
+                    m_device = nullptr;
+                    log("Failed to connect.");
+                }
             }
         } else {
             log("No devices found.");

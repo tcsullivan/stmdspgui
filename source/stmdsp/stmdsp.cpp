@@ -27,7 +27,7 @@ namespace stmdsp
     }
 
     device::device(const std::string& file) :
-        m_serial(file, 8'000'000/*230400*/, serial::Timeout::simpleTimeout(50))
+        m_serial(file, 8'000'000, serial::Timeout::simpleTimeout(50))
     {
         if (m_serial.isOpen()) {
             m_serial.flush();
@@ -178,6 +178,9 @@ namespace stmdsp
             m_serial.write(request, 3);
 
             m_serial.write((uint8_t *)buffer, size * sizeof(dacsample_t));
+	    // TODO
+	    if (!m_is_running)
+            	m_serial.write((uint8_t *)buffer, size * sizeof(dacsample_t));
         }
     }
 
