@@ -56,6 +56,12 @@ static void openCurrentFile()
     }
 }
 
+void openNewFile()
+{
+    fileCurrentPath.clear();
+    editor.SetText(stmdsp::file_content);
+}
+
 void fileScanTemplates()
 {
     auto path = std::filesystem::current_path() / "templates";
@@ -68,8 +74,7 @@ void fileRenderMenu()
     if (ImGui::BeginMenu("File")) {
         if (ImGui::MenuItem("New")) {
             // TODO modified?
-            fileCurrentPath.clear();
-            editor.SetText(stmdsp::file_content);
+            openNewFile();
             log("Ready.");
         }
 
@@ -129,18 +134,13 @@ void fileRenderDialog()
         if (ImGuiFileDialog::Instance()->IsOk()) {
             std::string filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
 
-            switch (fileAction) {
-            case FileAction::None:
-                break;
-            case FileAction::Open:
+	    if (fileAction == FileAction::Open) {
                 fileCurrentPath = filePathName;
                 openCurrentFile();
                 log("Ready.");
-                break;
-            case FileAction::SaveAs:
+	    } else if (fileAction == FileAction::SaveAs) {
                 fileCurrentPath = filePathName;
                 saveCurrentFile();
-                break;
             }
         }
         

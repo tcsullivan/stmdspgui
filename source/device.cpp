@@ -519,7 +519,7 @@ void deviceRenderToolbar()
     ImGui::SameLine();
     ImGui::SetNextItemWidth(100);
     if (ImGui::BeginCombo("", sampleRatePreview)) {
-        for (int i = 0; i < sampleRateList.size(); ++i) {
+        for (unsigned int i = 0; i < sampleRateList.size(); ++i) {
             if (ImGui::Selectable(sampleRateList[i])) {
                 sampleRatePreview = sampleRateList[i];
                 if (m_device != nullptr && !m_device->is_running()) {

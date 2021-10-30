@@ -5,12 +5,14 @@ project(stmdspgui VERSION 0.5)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-add_compile_options(-O0 -ggdb -g3 -Wall -Wextra -pedantic)
+add_compile_options(-O0 -ggdb -g3)
 
 file(GLOB SRC_IMGUI_BACKENDS "${CMAKE_SOURCE_DIR}/source/imgui/backends/*.cpp")
 file(GLOB SRC_IMGUI "${CMAKE_SOURCE_DIR}/source/imgui/*.cpp")
 file(GLOB SRC_STMDSP "${CMAKE_SOURCE_DIR}/source/stmdsp/*.cpp")
 file(GLOB SRC_STMDSPGUI "${CMAKE_SOURCE_DIR}/source/*.cpp")
+
+set_property(SOURCE ${SRC_STMDSPGUI} PROPERTY COMPILE_FLAGS "-Wall -Wextra -Wpedantic")
 
 add_executable(stmdspgui
     source/serial/src/serial.cc

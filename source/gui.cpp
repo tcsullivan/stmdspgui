@@ -57,6 +57,11 @@ bool guiInitialize()
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL2_Init();
 
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding = 5;
+    style.FrameRounding = 3;
+    style.ScrollbarRounding = 1;
+
     return true;
 }
 
@@ -71,7 +76,6 @@ void guiRender(void (*func)())
 
 void guiHandleEvents(bool& done)
 {
-    SDL_Event event;
     for (SDL_Event event; SDL_PollEvent(&event);) {
         ImGui_ImplSDL2_ProcessEvent(&event);
         if (event.type == SDL_QUIT)

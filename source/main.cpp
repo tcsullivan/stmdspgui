@@ -33,6 +33,7 @@ extern void guiRender(void (*func)());
 extern void fileRenderMenu();
 extern void fileRenderDialog();
 extern void fileScanTemplates();
+extern void openNewFile();
 
 extern void codeEditorInit();
 extern void codeRenderMenu();
@@ -62,6 +63,7 @@ int main(int, char **)
 
     fileScanTemplates();
     codeEditorInit();
+    openNewFile();
 
     while (!done) {
         auto endTime = std::chrono::steady_clock::now() +
