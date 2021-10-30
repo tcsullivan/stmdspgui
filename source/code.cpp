@@ -24,7 +24,7 @@
 #include <iostream>
 #include <string>
 
-extern stmdsp::device *m_device;
+extern std::shared_ptr<stmdsp::device> m_device;
 
 extern void log(const std::string& str);
 
@@ -75,7 +75,7 @@ void compileEditorCode()
     }
 
     stmdsp::platform platform;
-    if (m_device != nullptr) {
+    if (m_device) {
         platform = m_device->get_platform();
     } else {
         // Assume a default.

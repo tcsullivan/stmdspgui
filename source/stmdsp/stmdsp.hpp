@@ -12,14 +12,33 @@
 #ifndef STMDSP_HPP_
 #define STMDSP_HPP_
 
+#include <serial/serial.h>
+
 #include <cstdint>
 #include <list>
-#include <serial/serial.h>
+#include <memory>
 #include <string>
+#include <tuple>
 
 namespace stmdsp
 {
     constexpr unsigned int SAMPLES_MAX = 4096;
+
+    enum class RunStatus : char {
+        Idle = '1',
+        Running,
+        Recovering
+    };
+
+    enum class Error : char {
+        None = 0,
+        BadParam,
+        BadParamSize,
+        BadUserCodeLoad,
+        BadUserCodeSize,
+        NotIdle,
+        ConversionAborted
+    };
 
     class scanner
     {
@@ -46,39 +65,41 @@ namespace stmdsp
 
     enum class platform {
         Unknown,
-        H7,
-        L4,
-        G4
+        H7, /* Behind in feature support */
+        L4, /* Complete feature support */
+        G4  /* Currently unsupported */
     };
 
     class device
     {
     public:
         device(const std::string& file);
+        ~device();
 
-        ~device() {
-            m_serial.close();
-        }
-
-        bool connected() {
-            return m_serial.isOpen();
-        }
+        bool connected();
+        void disconnect();
 
         auto get_platform() const { return m_platform; }
+
         void continuous_set_buffer_size(unsigned int size);
         unsigned int get_buffer_size() const { return m_buffer_size; }
+
         void set_sample_rate(unsigned int id);
         unsigned int get_sample_rate();
+
         void continuous_start();
+        void continuous_stop();
+
         void continuous_start_measure();
         uint32_t continuous_start_get_measurement();
+
         std::vector<adcsample_t> continuous_read();
         std::vector<adcsample_t> continuous_read_input();
-        void continuous_stop();
 
         void siggen_upload(dacsample_t *buffer, unsigned int size);
         void siggen_start();
         void siggen_stop();
+
         bool is_siggening() const { return m_is_siggening; }
         bool is_running() const { return m_is_running; }
 
@@ -86,8 +107,10 @@ namespace stmdsp
         void upload_filter(unsigned char *buffer, size_t size);
         void unload_filter();
 
+        std::pair<RunStatus, Error> get_status();
+
     private:
-        serial::Serial m_serial;
+        std::unique_ptr<serial::Serial> m_serial;
         platform m_platform = platform::Unknown;
         unsigned int m_buffer_size = SAMPLES_MAX;
         unsigned int m_sample_rate = 0;

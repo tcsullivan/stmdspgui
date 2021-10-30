@@ -47,7 +47,6 @@ extern void deviceRenderWidgets();
 
 // Globals that live here
 bool done = false;
-stmdsp::device *m_device = nullptr;
 
 static LogView logView;
 
