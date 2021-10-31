@@ -17,6 +17,7 @@
 #include "stmdsp.hpp"
 
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "ImGuiFileDialog.h"
 #include "wav.hpp"
 
@@ -106,7 +107,7 @@ static void drawSamplesTask(std::shared_ptr<stmdsp::device> device)
 
         std::vector<stmdsp::dacsample_t> chunk;
 
-	if (lockDevice.try_lock_until(next)) {
+        if (lockDevice.try_lock_until(next)) {
             chunk = m_device->continuous_read();
             int tries = -1;
             while (chunk.empty() && m_device->is_running()) {
@@ -115,16 +116,16 @@ static void drawSamplesTask(std::shared_ptr<stmdsp::device> device)
                 std::this_thread::sleep_for(std::chrono::microseconds(20));
                 chunk = m_device->continuous_read();
             }
-	    lockDevice.unlock();
-	} else {
+            lockDevice.unlock();
+        } else {
             // Cooldown.
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
-	}
+        }
 
         if (drawSamplesInput && popupRequestDraw) {
             std::vector<stmdsp::dacsample_t> chunk2;
 
-	    if (lockDevice.try_lock_for(std::chrono::milliseconds(1))) {
+            if (lockDevice.try_lock_for(std::chrono::milliseconds(1))) {
                 chunk2 = m_device->continuous_read_input();
                 int tries = -1;
                 while (chunk2.empty() && m_device->is_running()) {
@@ -133,28 +134,28 @@ static void drawSamplesTask(std::shared_ptr<stmdsp::device> device)
                     std::this_thread::sleep_for(std::chrono::microseconds(20));
                     chunk2 = m_device->continuous_read_input();
                 }
-	        lockDevice.unlock();
+                lockDevice.unlock();
             }
 
-	    lockDraw.lock();
+            lockDraw.lock();
             auto i = chunk2.cbegin();
             for (const auto& s : chunk) {
                 drawSamplesQueue.push_back(s);
                 drawSamplesInputQueue.push_back(*i++);
             }
-	    lockDraw.unlock();
+            lockDraw.unlock();
         } else if (!doLogger) {
-	    lockDraw.lock();
+            lockDraw.lock();
             for (const auto& s : chunk)
                 drawSamplesQueue.push_back(s);
-	    lockDraw.unlock();
+            lockDraw.unlock();
         } else {
-	    lockDraw.lock();
+            lockDraw.lock();
             for (const auto& s : chunk) {
                 drawSamplesQueue.push_back(s);
                 logSamplesFile << s << '\n';
             }
-	    lockDraw.unlock();
+            lockDraw.unlock();
         }
         
         std::this_thread::sleep_until(next);
@@ -193,7 +194,7 @@ static void feedSigGenTask(std::shared_ptr<stmdsp::device> device)
 
         if (lockDevice.try_lock_until(next)) {
             m_device->siggen_upload(wavBuf.data(), wavBuf.size());
-	    lockDevice.unlock();
+            lockDevice.unlock();
             std::this_thread::sleep_until(next);
         }
     }
@@ -485,29 +486,24 @@ void deviceRenderMenu()
             deviceAlgorithmUpload();
         if (ImGui::MenuItem("Unload algorithm", nullptr, false, isConnected && !isRunning))
             deviceAlgorithmUnload();
+
         ImGui::Separator();
-        if (ImGui::Checkbox("Measure Code Time", &measureCodeTime)) {
-            if (!isConnected)
-                measureCodeTime = false;
-        }
+        if (!isConnected || isRunning)
+            ImGui::PushDisabled();
+        ImGui::Checkbox("Measure Code Time", &measureCodeTime);
         if (ImGui::Checkbox("Draw samples", &drawSamples)) {
-            if (isConnected) {
-                if (drawSamples)
-                    popupRequestDraw = true;
-            } else {
-                drawSamples = false;
-            }
+            if (drawSamples)
+                popupRequestDraw = true;
         }
         if (ImGui::Checkbox("Log results...", &logResults)) {
-            if (isConnected) {
-                if (logResults)
-                    popupRequestLog = true;
-                else if (logSamplesFile.is_open())
-                    logSamplesFile.close();
-            } else {
-                logResults = false;
-            }
+            if (logResults)
+                popupRequestLog = true;
+            else if (logSamplesFile.is_open())
+                logSamplesFile.close();
         }
+        if (!isConnected || isRunning)
+            ImGui::PopDisabled();
+
         if (ImGui::MenuItem("Set buffer size...", nullptr, false, isConnected && !isRunning)) {
             popupRequestBuffer = true;
         }
@@ -575,7 +571,7 @@ void deviceConnect()
                 m_device.reset(new stmdsp::device(devices.front()));
             } catch (...) {
                 log("Failed to connect (check permissions?).");
-		m_device.reset();
+                m_device.reset();
             }
 
             if (m_device) {

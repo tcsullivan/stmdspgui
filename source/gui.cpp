@@ -10,6 +10,7 @@
  */
 
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "backends/imgui_impl_sdl.h"
 #include "backends/imgui_impl_opengl2.h"
 
@@ -49,18 +50,51 @@ bool guiInitialize()
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     io = &ImGui::GetIO();
-    io->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    //io->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     fontSans = io->Fonts->AddFontFromFileTTF("fonts/Roboto-Regular.ttf", 20);
     fontMono = io->Fonts->AddFontFromFileTTF("fonts/RobotoMono-Regular.ttf", 20);
-    ImGui::StyleColorsLight();
 
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL2_Init();
 
+    ImGui::StyleColorsLight();
     ImGuiStyle& style = ImGui::GetStyle();
     style.WindowRounding = 5;
     style.FrameRounding = 3;
     style.ScrollbarRounding = 1;
+
+//#define ACCENT1 0.26f, 0.59f, 0.98f
+#define ACCENT1 0.6f, 0.6f, 0.6f
+#define ACCENT2 0.4f, 0.4f, 0.4f
+
+    style.Colors[ImGuiCol_FrameBgHovered]         = ImVec4(ACCENT1, 0.40f);
+    style.Colors[ImGuiCol_FrameBgActive]          = ImVec4(ACCENT1, 0.67f);
+    style.Colors[ImGuiCol_CheckMark]              = ImVec4(ACCENT1, 1.00f);
+    style.Colors[ImGuiCol_SliderGrab]             = ImVec4(ACCENT1, 0.78f);
+    style.Colors[ImGuiCol_SliderGrabActive]       = ImVec4(0.46f, 0.54f, 0.80f, 0.60f);
+    style.Colors[ImGuiCol_Button]                 = ImVec4(ACCENT1, 0.40f);
+    style.Colors[ImGuiCol_ButtonHovered]          = ImVec4(ACCENT1, 1.00f);
+    style.Colors[ImGuiCol_ButtonActive]           = ImVec4(ACCENT2, 1.00f);
+    style.Colors[ImGuiCol_Header]                 = ImVec4(ACCENT1, 0.31f);
+    style.Colors[ImGuiCol_HeaderHovered]          = ImVec4(ACCENT1, 0.80f);
+    style.Colors[ImGuiCol_HeaderActive]           = ImVec4(ACCENT1, 1.00f);
+    style.Colors[ImGuiCol_Separator]              = ImVec4(0.39f, 0.39f, 0.39f, 0.62f);
+    style.Colors[ImGuiCol_SeparatorHovered]       = ImVec4(0.14f, 0.44f, 0.80f, 0.78f);
+    style.Colors[ImGuiCol_SeparatorActive]        = ImVec4(0.14f, 0.44f, 0.80f, 1.00f);
+    style.Colors[ImGuiCol_ResizeGripHovered]      = ImVec4(ACCENT1, 0.67f);
+    style.Colors[ImGuiCol_ResizeGripActive]       = ImVec4(ACCENT1, 0.95f);
+    style.Colors[ImGuiCol_TableHeaderBg]          = ImVec4(0.78f, 0.87f, 0.98f, 1.00f);
+    style.Colors[ImGuiCol_TableBorderStrong]      = ImVec4(0.57f, 0.57f, 0.64f, 1.00f);
+    style.Colors[ImGuiCol_TableBorderLight]       = ImVec4(0.68f, 0.68f, 0.74f, 1.00f);
+    style.Colors[ImGuiCol_TextSelectedBg]         = ImVec4(ACCENT1, 0.35f);
+    style.Colors[ImGuiCol_DragDropTarget]         = ImVec4(ACCENT1, 0.95f);
+
+    style.Colors[ImGuiCol_Tab]                    = ImLerp(style.Colors[ImGuiCol_Header],       style.Colors[ImGuiCol_TitleBgActive], 0.90f);
+    style.Colors[ImGuiCol_TabHovered]             = style.Colors[ImGuiCol_HeaderHovered];
+    style.Colors[ImGuiCol_TabActive]              = ImLerp(style.Colors[ImGuiCol_HeaderActive], style.Colors[ImGuiCol_TitleBgActive], 0.60f);
+    style.Colors[ImGuiCol_TabUnfocused]           = ImLerp(style.Colors[ImGuiCol_Tab],          style.Colors[ImGuiCol_TitleBg], 0.80f);
+    style.Colors[ImGuiCol_TabUnfocusedActive]     = ImLerp(style.Colors[ImGuiCol_TabActive],    style.Colors[ImGuiCol_TitleBg], 0.40f);
+    style.Colors[ImGuiCol_NavHighlight]           = style.Colors[ImGuiCol_HeaderHovered];
 
     return true;
 }
