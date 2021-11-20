@@ -17,6 +17,7 @@
 
 #include "stmdsp_code.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -34,6 +35,7 @@ enum class FileAction {
     Save,
     SaveAs
 };
+
 static FileAction fileAction = FileAction::None;
 static std::string fileCurrentPath;
 static std::vector<std::filesystem::path> fileTemplateList;
@@ -56,17 +58,31 @@ static void openCurrentFile()
     }
 }
 
-void openNewFile()
+static void openNewFile()
 {
     fileCurrentPath.clear();
     editor.SetText(stmdsp::file_content);
 }
 
-void fileScanTemplates()
+static std::vector<std::filesystem::path> fileScanTemplates()
 {
-    auto path = std::filesystem::current_path() / "templates";
-    for (const auto& file : std::filesystem::recursive_directory_iterator{path})
-        fileTemplateList.push_back(file.path());
+    const auto path = std::filesystem::current_path() / "templates";
+    const std::filesystem::recursive_directory_iterator rdi (path);
+
+    std::vector<std::filesystem::path> list;
+    std::transform(
+        std::filesystem::begin(rdi),
+        std::filesystem::end(rdi),
+        std::back_inserter(list),
+        [](const auto& file) { return file.path(); });
+    std::sort(list.begin(), list.end());
+    return list;
+}
+
+void fileInit()
+{
+    fileTemplateList = fileScanTemplates();
+    openNewFile();
 }
 
 void fileRenderMenu()

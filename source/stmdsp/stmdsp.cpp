@@ -13,18 +13,23 @@
 
 #include <serial/serial.h>
 
+#include <algorithm>
+
 extern void log(const std::string& str);
 
 namespace stmdsp
 {
-    std::list<std::string>& scanner::scan()
+    const std::forward_list<std::string>& scanner::scan()
     {
         auto devices = serial::list_ports();
-        for (auto& device : devices) {
-            if (device.hardware_id.find(STMDSP_USB_ID) != std::string::npos)
-                m_available_devices.emplace_front(device.port);
-        }
-
+        auto foundDevicesEnd = std::remove_if(
+            devices.begin(), devices.end(),
+            [](const auto& dev) {
+                return dev.hardware_id.find(STMDSP_USB_ID) == std::string::npos;
+            });
+        std::transform(devices.begin(), foundDevicesEnd,
+            std::front_inserter(m_available_devices),
+            [](const auto& dev) { return dev.port; });
         return m_available_devices;
     }
 
@@ -33,6 +38,7 @@ namespace stmdsp
         // This could throw!
         m_serial.reset(new serial::Serial(file, 8'000'000, serial::Timeout::simpleTimeout(50)));
 
+        // Test the ID command.
         m_serial->flush();
         m_serial->write("i");
         auto id = m_serial->read(7);
@@ -66,98 +72,80 @@ namespace stmdsp
             m_serial.release();
     }
 
-    void device::continuous_set_buffer_size(unsigned int size) {
+    bool device::try_command(std::basic_string<uint8_t> cmd) {
+        bool success = false;
+
         if (connected()) {
-            m_buffer_size = size;
-
-            uint8_t request[3] = {
-                'B',
-                static_cast<uint8_t>(size),
-                static_cast<uint8_t>(size >> 8)
-            };
-
             try {
-                m_serial->write(request, 3);
+                std::scoped_lock lock (m_lock);
+                m_serial->write(cmd.data(), cmd.size());
+                success = true;
             } catch (...) {
                 m_serial.release();
                 log("Lost connection!");
             }
+        }
+
+        return success;
+    }
+
+    bool device::try_read(std::basic_string<uint8_t> cmd, uint8_t *dest, unsigned int dest_size) {
+        bool success = false;
+
+        if (connected() && dest && dest_size > 0) {
+            try {
+                std::scoped_lock lock (m_lock);
+                m_serial->write(cmd.data(), cmd.size());
+                m_serial->read(dest, dest_size);
+                success = true;
+            } catch (...) {
+                m_serial.release();
+                log("Lost connection!");
+            }
+        }
+
+        return success;
+    }
+
+    void device::continuous_set_buffer_size(unsigned int size) {
+        if (try_command({
+                'B',
+                static_cast<uint8_t>(size),
+                static_cast<uint8_t>(size >> 8)}))
+        {
+            m_buffer_size = size;
         }
     }
 
     void device::set_sample_rate(unsigned int id) {
-        if (connected()) {
-            uint8_t request[2] = {
-                'r',
-                static_cast<uint8_t>(id)
-            };
-
-            try {
-                m_serial->write(request, 2);
-            } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
-            }
-        }
+        try_command({
+            'r',
+            static_cast<uint8_t>(id)
+        });
     }
 
     unsigned int device::get_sample_rate() {
-        if (connected() && !is_running()) {
-            uint8_t request[2] = {
-                'r', 0xFF
-            };
-
-            unsigned char result = 0xFF;
-            try {
-                m_serial->write(request, 2);
-                m_serial->read(&result, 1);
-            } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
-            }
-
-            m_sample_rate = result;
+        if (!is_running()) {
+            uint8_t result = 0xFF;
+            if (try_read({'r', 0xFF}, &result, 1))
+                m_sample_rate = result;
         }
-
         return m_sample_rate;
     }
 
     void device::continuous_start() {
-        if (connected()) {
-            try {
-                m_serial->write("R");
-                m_is_running = true;
-            } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
-            }
-        }
+        if (try_command({'R'}))
+            m_is_running = true;
     }
 
     void device::continuous_start_measure() {
-        if (connected()) {
-            try {
-                m_serial->write("M");
-                m_is_running = true;
-            } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
-            }
-        }
+        if (try_command({'M'}))
+            m_is_running = true;
     }
 
     uint32_t device::continuous_start_get_measurement() {
         uint32_t count = 0;
-        if (connected()) {
-            try {
-                m_serial->write("m");
-                m_serial->read(reinterpret_cast<uint8_t *>(&count), sizeof(uint32_t));
-            } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
-            }
-        }
-
+        try_read({'m'}, reinterpret_cast<uint8_t *>(&count), sizeof(uint32_t));
         return count / 2;
     }
 
@@ -226,18 +214,11 @@ namespace stmdsp
     }
 
     void device::continuous_stop() {
-        if (connected()) {
-            try {
-                m_serial->write("S");
-                m_is_running = false;
-            } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
-            }
-        }
+        if (try_command({'S'}))
+            m_is_running = false;
     }
 
-    void device::siggen_upload(dacsample_t *buffer, unsigned int size) {
+    bool device::siggen_upload(dacsample_t *buffer, unsigned int size) {
         if (connected()) {
             uint8_t request[3] = {
                 'D',
@@ -245,39 +226,41 @@ namespace stmdsp
                 static_cast<uint8_t>(size >> 8)
             };
 
-            try {
-                m_serial->write(request, 3);
-                // TODO different write size if feeding audio?
-                m_serial->write((uint8_t *)buffer, size * sizeof(dacsample_t));
-            } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
+            if (!m_is_siggening) {
+                try {
+                    m_serial->write(request, 3);
+                    m_serial->write((uint8_t *)buffer, size * sizeof(dacsample_t));
+                } catch (...) {
+                    m_serial.release();
+                    log("Lost connection!");
+                }
+            } else {
+                try {
+                    m_serial->write(request, 3);
+                    if (m_serial->read(1)[0] == 0)
+                        return false;
+                    else
+                        m_serial->write((uint8_t *)buffer, size * sizeof(dacsample_t));
+                } catch (...) {
+                    m_serial.release();
+                    log("Lost connection!");
+                }
             }
+
+            return true;
+        } else {
+            return false;
         }
     }
 
     void device::siggen_start() {
-        if (connected()) {
-            try {
-                m_serial->write("W");
-                m_is_siggening = true;
-            } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
-            }
-        }
+        if (try_command({'W'}))
+            m_is_siggening = true;
     }
 
     void device::siggen_stop() {
-        if (connected()) {
-            try {
-                m_serial->write("w");
-                m_is_siggening = false;
-            } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
-            }
-        }
+        if (try_command({'w'}))
+            m_is_siggening = false;
     }
 
     void device::upload_filter(unsigned char *buffer, size_t size) {
@@ -299,33 +282,22 @@ namespace stmdsp
     }
 
     void device::unload_filter() {
-        if (connected()) {
-            try {
-                m_serial->write("e");
-            } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
-            }
-        }
+        try_command({'e'});
     }
 
     std::pair<RunStatus, Error> device::get_status() {
         std::pair<RunStatus, Error> ret;
 
-        if (connected()) {
-            try {
-                m_serial->write("I");
-                auto result = m_serial->read(2);
-                ret = {static_cast<RunStatus>(result[0]),
-                       static_cast<Error>(result[1])};
+        unsigned char buf[2];
+        if (try_read({'I'}, buf, 2)) {
+            ret = {
+                static_cast<RunStatus>(buf[0]),
+                static_cast<Error>(buf[1])
+            };
 
-                bool running = ret.first == RunStatus::Running;
-                if (m_is_running != running)
-                    m_is_running = running;
-            } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
-            }
+            bool running = ret.first == RunStatus::Running;
+            if (m_is_running != running)
+                m_is_running = running;
         }
 
         return ret;

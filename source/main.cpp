@@ -32,8 +32,7 @@ extern void guiRender(void (*func)());
 
 extern void fileRenderMenu();
 extern void fileRenderDialog();
-extern void fileScanTemplates();
-extern void openNewFile();
+extern void fileInit();
 
 extern void codeEditorInit();
 extern void codeRenderMenu();
@@ -60,9 +59,8 @@ int main(int, char **)
     if (!guiInitialize())
         return -1;
 
-    fileScanTemplates();
     codeEditorInit();
-    openNewFile();
+    fileInit();
 
     while (!done) {
         auto endTime = std::chrono::steady_clock::now() +
@@ -90,21 +88,22 @@ int main(int, char **)
                          ImGuiWindowFlags_NoBringToFrontOnFocus);
 
         // Render main controls (order is important).
-        ImGui::PushFont(fontSans);
-        codeRenderToolbar();
-        deviceRenderToolbar();
-        fileRenderDialog();
-        deviceRenderWidgets();
-        ImGui::PopFont();
+        {
+            ImGui::PushFont(fontSans);
+            codeRenderToolbar();
+            deviceRenderToolbar();
+            fileRenderDialog();
+            deviceRenderWidgets();
+            ImGui::PopFont();
 
-        ImGui::PushFont(fontMono);
-        codeRenderWidgets();
-        ImGui::SetNextWindowPos({0, WINDOW_HEIGHT - 200});
-        ImGui::SetNextWindowSize({WINDOW_WIDTH, 200});
-        logView.Draw("log", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBringToFrontOnFocus);
-        ImGui::PopFont();
+            ImGui::PushFont(fontMono);
+            codeRenderWidgets();
+            ImGui::SetNextWindowPos({0, WINDOW_HEIGHT - 200});
+            ImGui::SetNextWindowSize({WINDOW_WIDTH, 200});
+            logView.Draw("log", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBringToFrontOnFocus);
+            ImGui::PopFont();
+        }
 
-        // Finish main view rendering.
         ImGui::End();
 
         deviceRenderDraw();

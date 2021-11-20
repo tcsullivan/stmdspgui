@@ -33,6 +33,8 @@ std::string tempFileName; // device.cpp
 static std::string editorCompiled;
 
 static std::string newTempFileName();
+static bool codeExecuteCommand(const std::string& command, const std::string& file);
+static void stringReplaceAll(std::string& str, const std::string& what, const std::string& with);
 static void compileEditorCode();
 static void disassembleCode();
 
@@ -64,6 +66,39 @@ void codeRenderWidgets()
     editor.Render("code", {WINDOW_WIDTH - 15, 450}, true);
 }
 
+std::string newTempFileName()
+{
+    const auto path = std::filesystem::temp_directory_path() / "stmdspgui_build";
+    return path.string();
+}
+
+bool codeExecuteCommand(const std::string& command, const std::string& file)
+{
+    if (system(command.c_str()) == 0) {
+        if (std::ifstream output (file); output.good()) {
+            std::ostringstream sstr;
+            sstr << output.rdbuf();
+            log(sstr.str().c_str());
+        } else {
+            log("Could not read command output!");
+        }
+
+        std::filesystem::remove(file);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+void stringReplaceAll(std::string& str, const std::string& what, const std::string& with)
+{
+    std::size_t i;
+    while ((i = str.find(what)) != std::string::npos) {
+        str.replace(i, what.size(), with);
+        i += what.size();
+    }
+};
+
 void compileEditorCode()
 {
     log("Compiling...");
@@ -74,35 +109,28 @@ void compileEditorCode()
         std::filesystem::remove(tempFileName + ".orig.o");
     }
 
-    stmdsp::platform platform;
-    if (m_device) {
-        platform = m_device->get_platform();
-    } else {
-        // Assume a default.
-        platform = stmdsp::platform::L4;
-    }
+    const auto platform = m_device ? m_device->get_platform()
+                                   : stmdsp::platform::L4;
 
-    if (tempFileName.size() == 0)
+    if (tempFileName.empty())
         tempFileName = newTempFileName();
+
 
     {
         std::ofstream file (tempFileName, std::ios::trunc | std::ios::binary);
 
-        auto file_text = platform == stmdsp::platform::L4 ? stmdsp::file_header_l4
-                                                          : stmdsp::file_header_h7;
-        auto samples_text = std::to_string(m_device ? m_device->get_buffer_size()
-                                                    : stmdsp::SAMPLES_MAX);
-        for (std::size_t i = 0; (i = file_text.find("$0", i)) != std::string::npos;) {
-            file_text.replace(i, 2, samples_text);
-            i += 2;
-        }
+        auto file_text =
+            platform == stmdsp::platform::L4 ? stmdsp::file_header_l4
+                                             : stmdsp::file_header_h7;
+        const auto buffer_size = m_device ? m_device->get_buffer_size()
+                                          : stmdsp::SAMPLES_MAX;
 
-        file << file_text;
-        file << "\n";
-        file << editor.GetText();
+        stringReplaceAll(file_text, "$0", std::to_string(buffer_size));
+
+        file << file_text << '\n' << editor.GetText();
     }
 
-    constexpr const char *script_ext =
+    const auto scriptFile = tempFileName +
 #ifndef STMDSP_WIN32
         ".sh";
 #else
@@ -110,44 +138,33 @@ void compileEditorCode()
 #endif
 
     {
-        std::ofstream makefile (tempFileName + script_ext, std::ios::binary);
-        auto make_text = platform == stmdsp::platform::L4 ? stmdsp::makefile_text_l4
-                                                          : stmdsp::makefile_text_h7;
-        auto cwd = std::filesystem::current_path().string();
-        for (std::size_t i = 0; (i = make_text.find("$0", i)) != std::string::npos;) {
-            make_text.replace(i, 2, tempFileName);
-            i += 2;
-        }
-        for (std::size_t i = 0; (i = make_text.find("$1", i)) != std::string::npos;) {
-            make_text.replace(i, 2, cwd);
-            i += 2;
-        }
+        std::ofstream makefile (scriptFile, std::ios::binary);
+        auto make_text =
+            platform == stmdsp::platform::L4 ? stmdsp::makefile_text_l4
+                                             : stmdsp::makefile_text_h7;
+
+        stringReplaceAll(make_text, "$0", tempFileName);
+        stringReplaceAll(make_text, "$1",
+                         std::filesystem::current_path().string());
 
         makefile << make_text;
     }
 
-    auto makeOutput = tempFileName + script_ext + ".log";
-    auto makeCommand = tempFileName + script_ext + " > " + makeOutput + " 2>&1";
-
 #ifndef STMDSP_WIN32
-    system((std::string("chmod +x ") + tempFileName + script_ext).c_str());
+    system((std::string("chmod +x ") + scriptFile).c_str());
 #endif
-    int result = system(makeCommand.c_str());
-    std::ifstream result_file (makeOutput);
-    std::ostringstream sstr;
-    sstr << result_file.rdbuf();
-    log(sstr.str().c_str());
 
-    std::filesystem::remove(tempFileName);
-    std::filesystem::remove(tempFileName + script_ext);
-    std::filesystem::remove(makeOutput);
-
-    if (result == 0) {
+    const auto makeOutput = scriptFile + ".log";
+    const auto makeCommand = scriptFile + " > " + makeOutput + " 2>&1";
+    if (codeExecuteCommand(makeCommand, makeOutput)) {
         editorCompiled = editor.GetText();
         log("Compilation succeeded.");
     } else {
         log("Compilation failed.");
     }
+
+    std::filesystem::remove(tempFileName);
+    std::filesystem::remove(scriptFile);
 }
 
 void disassembleCode()
@@ -158,31 +175,15 @@ void disassembleCode()
         compileEditorCode();
     }
 
-    auto output = tempFileName + ".asm.log";
-    auto command = std::string("arm-none-eabi-objdump -d --no-show-raw-insn ") +
+    const auto output = tempFileName + ".asm.log";
+    const auto command =
+        std::string("arm-none-eabi-objdump -d --no-show-raw-insn ") +
         tempFileName + ".orig.o > " + output + " 2>&1";
-    
-    if (system(command.c_str()) == 0) {
-        {
-            std::ifstream result_file (output);
-            std::ostringstream sstr;
-            sstr << result_file.rdbuf();
-            log(sstr.str().c_str());
-        }
 
-        ImGui::OpenPopup("compile");
-        std::filesystem::remove(output);
-
+    if (codeExecuteCommand(command, output)) {
         log("Ready.");
     } else {
         log("Failed to load disassembly.");
     }
-}
-
-std::string newTempFileName()
-{
-    auto tempPath = std::filesystem::temp_directory_path();
-    tempPath /= "stmdspgui_build";
-    return tempPath.string();
 }
 

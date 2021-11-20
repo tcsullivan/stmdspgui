@@ -9,11 +9,6 @@
  * If not, see <https://www.gnu.org/licenses/>.
  */
 
-/**
- * TODO list:
- * - Improve signal generator audio streaming.
- */
-
 #include "stmdsp.hpp"
 
 #include "imgui.h"
@@ -80,11 +75,41 @@ static unsigned int drawSamplesBufferSize = 1;
 
 static void measureCodeTask(std::shared_ptr<stmdsp::device> device)
 {
-    if (!device)
-        return;
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    auto cycles = device->continuous_start_get_measurement();
-    log(std::string("Execution time: ") + std::to_string(cycles) + " cycles.");
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    if (device) {
+        const auto cycles = device->continuous_start_get_measurement();
+        log(std::string("Execution time: ") + std::to_string(cycles) + " cycles.");
+    }
+}
+
+static std::vector<stmdsp::dacsample_t> tryReceiveChunk(
+    std::shared_ptr<stmdsp::device> device,
+    auto readFunc)
+{
+    int tries = -1;
+    do {
+        const auto chunk = readFunc(device.get());
+        if (!chunk.empty())
+            return chunk;
+        else
+            std::this_thread::sleep_for(std::chrono::microseconds(20));
+    } while (++tries < 100 && device->is_running());
+
+    return {};
+}
+
+static std::chrono::duration<double> getBufferPeriod(
+    std::shared_ptr<stmdsp::device> device,
+    const double factor = 0.975)
+{
+    if (device) {
+        const double bufferSize = device->get_buffer_size();
+        const double sampleRate = sampleRateInts[device->get_sample_rate()];
+        return std::chrono::duration<double>(bufferSize / sampleRate * factor);
+    } else {
+        return {};
+    }
 }
 
 static void drawSamplesTask(std::shared_ptr<stmdsp::device> device)
@@ -93,71 +118,45 @@ static void drawSamplesTask(std::shared_ptr<stmdsp::device> device)
         return;
 
     const bool doLogger = logResults && logSamplesFile.good();
-
-    const double bufferSize = m_device->get_buffer_size();
-    const double sampleRate = sampleRateInts[m_device->get_sample_rate()];
-    unsigned long bufferTime = bufferSize / sampleRate * 0.975 * 1e6;
+    const auto bufferTime = getBufferPeriod(device);
 
     std::unique_lock<std::timed_mutex> lockDraw (mutexDrawSamples, std::defer_lock);
     std::unique_lock<std::timed_mutex> lockDevice (mutexDeviceLoad, std::defer_lock);
 
-    while (m_device && m_device->is_running()) {
-        auto next = std::chrono::high_resolution_clock::now() +
-                    std::chrono::microseconds(bufferTime);
+    auto addToQueue = [&lockDraw](auto& queue, const auto& chunk) {
+        lockDraw.lock();
+        std::copy(chunk.cbegin(), chunk.cend(), std::back_inserter(queue));
+        lockDraw.unlock();
+    };
 
-        std::vector<stmdsp::dacsample_t> chunk;
+    while (device && device->is_running()) {
+        const auto next = std::chrono::high_resolution_clock::now() + bufferTime;
 
         if (lockDevice.try_lock_until(next)) {
-            chunk = m_device->continuous_read();
-            int tries = -1;
-            while (chunk.empty() && m_device->is_running()) {
-                if (++tries == 100)
-                    break;
-                std::this_thread::sleep_for(std::chrono::microseconds(20));
-                chunk = m_device->continuous_read();
-            }
+            const auto chunk = tryReceiveChunk(device,
+                std::mem_fn(&stmdsp::device::continuous_read));
             lockDevice.unlock();
+
+            addToQueue(drawSamplesQueue, chunk);
+            if (doLogger) {
+                for (const auto& s : chunk)
+                    logSamplesFile << s << '\n';
+            }
         } else {
-            // Cooldown.
+            // Device must be busy, cooldown.
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
 
         if (drawSamplesInput && popupRequestDraw) {
-            std::vector<stmdsp::dacsample_t> chunk2;
-
             if (lockDevice.try_lock_for(std::chrono::milliseconds(1))) {
-                chunk2 = m_device->continuous_read_input();
-                int tries = -1;
-                while (chunk2.empty() && m_device->is_running()) {
-                    if (++tries == 100)
-                        break;
-                    std::this_thread::sleep_for(std::chrono::microseconds(20));
-                    chunk2 = m_device->continuous_read_input();
-                }
+                const auto chunk2 = tryReceiveChunk(device,
+                    std::mem_fn(&stmdsp::device::continuous_read_input));
                 lockDevice.unlock();
-            }
 
-            lockDraw.lock();
-            auto i = chunk2.cbegin();
-            for (const auto& s : chunk) {
-                drawSamplesQueue.push_back(s);
-                drawSamplesInputQueue.push_back(*i++);
+                addToQueue(drawSamplesInputQueue, chunk2);
             }
-            lockDraw.unlock();
-        } else if (!doLogger) {
-            lockDraw.lock();
-            for (const auto& s : chunk)
-                drawSamplesQueue.push_back(s);
-            lockDraw.unlock();
-        } else {
-            lockDraw.lock();
-            for (const auto& s : chunk) {
-                drawSamplesQueue.push_back(s);
-                logSamplesFile << s << '\n';
-            }
-            lockDraw.unlock();
         }
-        
+
         std::this_thread::sleep_until(next);
     }
 }
@@ -167,36 +166,36 @@ static void feedSigGenTask(std::shared_ptr<stmdsp::device> device)
     if (!device)
         return;
 
-    const auto bufferSize = m_device->get_buffer_size();
-    const double sampleRate = sampleRateInts[m_device->get_sample_rate()];
-    const unsigned long delay = bufferSize / sampleRate * 0.975 * 1e6;
+    const auto delay = getBufferPeriod(device);
+    const auto uploadDelay = getBufferPeriod(device, 0.001);
 
-    std::vector<stmdsp::adcsample_t> wavBuf (bufferSize, 2048);
+    std::vector<stmdsp::dacsample_t> wavBuf (device->get_buffer_size() * 2, 2048);
 
     std::unique_lock<std::timed_mutex> lockDevice (mutexDeviceLoad, std::defer_lock);
 
     lockDevice.lock();
-    // One (or both) of these freezes the device...
-    m_device->siggen_upload(wavBuf.data(), wavBuf.size());
-    //m_device->siggen_start();
+    device->siggen_upload(wavBuf.data(), wavBuf.size());
+    wavBuf.resize(wavBuf.size() / 2);
+    device->siggen_start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
     lockDevice.unlock();
 
-    std::this_thread::sleep_for(std::chrono::microseconds(delay));
+    std::vector<int16_t> wavIntBuf (wavBuf.size());
 
-    return;
     while (genRunning) {
-        auto next = std::chrono::high_resolution_clock::now() +
-                    std::chrono::microseconds(delay);
+        const auto next = std::chrono::high_resolution_clock::now() + delay;
 
-        auto src = reinterpret_cast<uint16_t *>(wavOutput.next(bufferSize));
-        for (auto& w : wavBuf)
-            w = *src++ / 16 + 2048;
+        wavOutput.next(wavIntBuf.data(), wavIntBuf.size());
+        auto src = wavIntBuf.cbegin();
+        std::generate(wavBuf.begin(), wavBuf.end(),
+            [&src] { return static_cast<stmdsp::dacsample_t>(*src++ / 16 + 2048); });
 
-        if (lockDevice.try_lock_until(next)) {
-            m_device->siggen_upload(wavBuf.data(), wavBuf.size());
-            lockDevice.unlock();
-            std::this_thread::sleep_until(next);
-        }
+        lockDevice.lock();
+        while (!device->siggen_upload(wavBuf.data(), wavBuf.size()))
+            std::this_thread::sleep_for(uploadDelay);
+        lockDevice.unlock();
+
+        std::this_thread::sleep_until(next);
     }
 }
 
@@ -208,16 +207,20 @@ static void statusTask(std::shared_ptr<stmdsp::device> device)
     while (device->connected()) {
         std::unique_lock<std::timed_mutex> lockDevice (mutexDeviceLoad, std::defer_lock);
         lockDevice.lock();
-        auto [status, error] = device->get_status();
+        const auto [status, error] = device->get_status();
         lockDevice.unlock();
 
         if (error != stmdsp::Error::None) {
-            if (error == stmdsp::Error::NotIdle) {
+            switch (error) {
+            case stmdsp::Error::NotIdle:
                 log("Error: Device already running...");
-            } else if (error == stmdsp::Error::ConversionAborted) {
+                break;
+            case stmdsp::Error::ConversionAborted:
                 log("Error: Algorithm unloaded, a fault occurred!");
-            } else {
+                break;
+            default:
                 log("Error: Device had an issue...");
+                break;
             }
         }
 
@@ -383,13 +386,13 @@ void deviceRenderDraw()
             drawSamplesBufferSize = std::round(sr * tf);
         }
         ImGui::SameLine();
-        ImGui::Text("Y-minmax: %u", yMinMax);
+        ImGui::Text("Y: +/-%1.2fV", 3.3f * (static_cast<float>(yMinMax) / 4095.f));
         ImGui::SameLine();
-        if (ImGui::Button("--", {30, 0})) {
+        if (ImGui::Button(" - ", {30, 0})) {
             yMinMax = std::max(63u, yMinMax >> 1);
         }
         ImGui::SameLine();
-        if (ImGui::Button("++", {30, 0})) {
+        if (ImGui::Button(" + ", {30, 0})) {
             yMinMax = std::min(4095u, (yMinMax << 1) | 1);
         }
 
@@ -508,7 +511,7 @@ void deviceRenderMenu()
             popupRequestBuffer = true;
         }
         ImGui::Separator();
-        if (ImGui::MenuItem("Load signal generator", nullptr, false, isConnected && !isRunning)) {
+        if (ImGui::MenuItem("Load signal generator", nullptr, false, isConnected && !m_device->is_siggening())) {
             popupRequestSiggen = true;
         }
         static const char *startSiggenLabel = "Start signal generator";
@@ -542,22 +545,26 @@ void deviceRenderToolbar()
         deviceAlgorithmUpload();
     ImGui::SameLine();
     ImGui::SetNextItemWidth(100);
+
+    const bool enable = m_device && !m_device->is_running() && !m_device->is_siggening();
+    if (!enable)
+        ImGui::PushDisabled();
     if (ImGui::BeginCombo("", sampleRatePreview)) {
         for (unsigned int i = 0; i < sampleRateList.size(); ++i) {
             if (ImGui::Selectable(sampleRateList[i])) {
                 sampleRatePreview = sampleRateList[i];
-                if (m_device && !m_device->is_running()) {
-                    do {
-                        m_device->set_sample_rate(i);
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                    } while (m_device->get_sample_rate() != i);
+                do {
+                    m_device->set_sample_rate(i);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                } while (m_device->get_sample_rate() != i);
 
-                    drawSamplesBufferSize = std::round(sampleRateInts[i] * drawSamplesTimeframe);
-                }
+                drawSamplesBufferSize = std::round(sampleRateInts[i] * drawSamplesTimeframe);
             }
         }
         ImGui::EndCombo();
     }
+    if (!enable)
+        ImGui::PopDisabled();
 }
 
 void deviceConnect()
@@ -566,7 +573,7 @@ void deviceConnect()
 
     if (!m_device) {
         stmdsp::scanner scanner;
-        if (auto devices = scanner.scan(); devices.size() > 0) {
+        if (auto devices = scanner.scan(); !devices.empty()) {
             try {
                 m_device.reset(new stmdsp::device(devices.front()));
             } catch (...) {
@@ -608,8 +615,7 @@ void deviceStart()
 
     if (m_device->is_running()) {
         {
-            std::scoped_lock lock (mutexDrawSamples);
-            std::scoped_lock lock2 (mutexDeviceLoad);
+            std::scoped_lock lock (mutexDrawSamples, mutexDeviceLoad);
             std::this_thread::sleep_for(std::chrono::microseconds(150));
             m_device->continuous_stop();
         }
@@ -637,10 +643,9 @@ void deviceAlgorithmUpload()
     if (!m_device) {
         log("No device connected.");
         return;
-    }
-
-    if (m_device->is_running())
+    } else if (m_device->is_running()) {
         return;
+    }
 
     if (std::ifstream algo (tempFileName + ".o"); algo.good()) {
         std::ostringstream sstr;
@@ -658,41 +663,38 @@ void deviceAlgorithmUnload()
 {
     if (!m_device) {
         log("No device connected.");
-        return;
-    }
-
-    if (!m_device->is_running()) {
+    } else if (!m_device->is_running()) {
         m_device->unload_filter();
         log("Algorithm unloaded.");
     }
 }
 
-void deviceGenLoadList(std::string_view listStr)
+void deviceGenLoadList(const std::string_view list)
 {
     std::vector<stmdsp::dacsample_t> samples;
 
-    while (listStr.size() > 0 && samples.size() <= stmdsp::SAMPLES_MAX * 2) {
-        auto numberEnd = listStr.find_first_not_of("0123456789");
-
+    auto it = list.cbegin();
+    while (it != list.cend() && samples.size() < stmdsp::SAMPLES_MAX * 2) {
+        const auto end = list.find_first_not_of("0123456789",
+            std::distance(list.cbegin(), it));
+        const auto itend = end != std::string_view::npos ? list.cbegin() + end
+                                                         : list.cend();
         unsigned long n;
-        auto end = numberEnd != std::string_view::npos ? listStr.begin() + numberEnd : listStr.end();
-        auto [ptr, ec] = std::from_chars(listStr.begin(), end, n);
+        const auto [ptr, ec] = std::from_chars(it, itend, n);
         if (ec != std::errc())
             break;
 
         samples.push_back(n & 4095);
-        if (end == listStr.end())
-            break;
-        listStr = listStr.substr(numberEnd + 1);
+        it = itend;
     }
 
     if (samples.size() <= stmdsp::SAMPLES_MAX * 2) {
         // DAC buffer must be of even size
-        if ((samples.size() & 1) == 1)
+        if (samples.size() % 2 != 0)
             samples.push_back(samples.back());
 
         if (m_device)
-            m_device->siggen_upload(&samples[0], samples.size());
+            m_device->siggen_upload(samples.data(), samples.size());
         log("Generator ready.");
     } else {
         log("Error: Too many samples for signal generator.");
@@ -703,9 +705,9 @@ void deviceGenLoadFormula(std::string_view formula)
 {
     auto samples = deviceGenLoadFormulaEval(formula);
 
-    if (samples.size() > 0) {
+    if (!samples.empty()) {
         if (m_device)
-            m_device->siggen_upload(&samples[0], samples.size());
+            m_device->siggen_upload(samples.data(), samples.size());
 
         log("Generator ready.");
     } else {
