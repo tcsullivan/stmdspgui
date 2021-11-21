@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <string>
 #include <vector>
 
 namespace wav
@@ -44,7 +45,7 @@ namespace wav
 
     class clip {
     public:
-        clip(const char *path) {
+        clip(const std::string& path) {
             std::ifstream file (path);
             if (!file.good())
                 return;

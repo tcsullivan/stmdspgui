@@ -13,7 +13,8 @@ OUTPUT := stmdspgui
 #CXXFLAGS := -std=c++20 -O2 \
 #            -Isource -Isource/imgui -Isource/stmdsp -Isource/serial/include
 CXXFLAGS := -std=c++20 -ggdb -O0 -g3 \
-            -Isource -Isource/imgui -Isource/stmdsp -Isource/serial/include
+            -Isource -Isource/imgui -Isource/stmdsp -Isource/serial/include \
+            -Wall -Wextra -pedantic
 
 all: $(OUTPUT)
 

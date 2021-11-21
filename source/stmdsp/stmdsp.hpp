@@ -117,7 +117,7 @@ namespace stmdsp
         void continuous_set_buffer_size(unsigned int size);
         unsigned int get_buffer_size() const { return m_buffer_size; }
 
-        void set_sample_rate(unsigned int id);
+        void set_sample_rate(unsigned int rate);
         unsigned int get_sample_rate();
 
         void continuous_start();

@@ -17,6 +17,15 @@
 
 extern void log(const std::string& str);
 
+std::array<unsigned int, 6> sampleRateInts {{
+    8'000,
+    16'000,
+    20'000,
+    32'000,
+    48'000,
+    96'000
+}};
+
 namespace stmdsp
 {
     const std::forward_list<std::string>& scanner::scan()
@@ -117,11 +126,19 @@ namespace stmdsp
         }
     }
 
-    void device::set_sample_rate(unsigned int id) {
-        try_command({
-            'r',
-            static_cast<uint8_t>(id)
-        });
+    void device::set_sample_rate(unsigned int rate) {
+        auto it = std::find(
+            sampleRateInts.cbegin(),
+            sampleRateInts.cend(),
+            rate);
+
+        if (it != sampleRateInts.cend()) {
+            const auto i = std::distance(sampleRateInts.cbegin(), it);
+            try_command({
+                'r',
+                static_cast<uint8_t>(i)
+            });
+        }
     }
 
     unsigned int device::get_sample_rate() {
@@ -130,7 +147,10 @@ namespace stmdsp
             if (try_read({'r', 0xFF}, &result, 1))
                 m_sample_rate = result;
         }
-        return m_sample_rate;
+
+        return m_sample_rate < sampleRateInts.size() ?
+            sampleRateInts[m_sample_rate] :
+            0;
     }
 
     void device::continuous_start() {

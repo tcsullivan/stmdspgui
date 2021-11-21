@@ -12,8 +12,6 @@
 #include "stmdsp.hpp"
 
 #include "imgui.h"
-#include "imgui_internal.h"
-#include "ImGuiFileDialog.h"
 #include "wav.hpp"
 
 #include <array>
@@ -21,57 +19,34 @@
 #include <cmath>
 #include <deque>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <string>
+#include <string_view>
 #include <thread>
+#include <vector>
 
 extern std::string tempFileName;
 extern void log(const std::string& str);
-
 extern std::vector<stmdsp::dacsample_t> deviceGenLoadFormulaEval(const std::string_view);
 
 std::shared_ptr<stmdsp::device> m_device;
 
-static const std::array<const char *, 6> sampleRateList {{
-    "8 kHz",
-    "16 kHz",
-    "20 kHz",
-    "32 kHz",
-    "48 kHz",
-    "96 kHz"
-}};
-static const char *sampleRatePreview = sampleRateList[0];
-static const std::array<unsigned int, 6> sampleRateInts {{
-    8'000,
-    16'000,
-    20'000,
-    32'000,
-    48'000,
-    96'000
-}};
-
-static bool measureCodeTime = false;
-static bool drawSamples = false;
-static bool logResults = false;
-static bool genRunning = false;
-static bool drawSamplesInput = false;
-
-static bool popupRequestBuffer = false;
-static bool popupRequestSiggen = false;
-static bool popupRequestDraw = false;
-static bool popupRequestLog = false;
-
 static std::timed_mutex mutexDrawSamples;
 static std::timed_mutex mutexDeviceLoad;
-
 static std::ofstream logSamplesFile;
 static wav::clip wavOutput;
-
 static std::deque<stmdsp::dacsample_t> drawSamplesQueue;
 static std::deque<stmdsp::dacsample_t> drawSamplesInputQueue;
-static double drawSamplesTimeframe = 1.0; // seconds
+static bool drawSamplesInput = false;
 static unsigned int drawSamplesBufferSize = 1;
+
+void deviceSetInputDrawing(bool enabled)
+{
+    drawSamplesInput = enabled;
+}
 
 static void measureCodeTask(std::shared_ptr<stmdsp::device> device)
 {
@@ -105,7 +80,7 @@ static std::chrono::duration<double> getBufferPeriod(
 {
     if (device) {
         const double bufferSize = device->get_buffer_size();
-        const double sampleRate = sampleRateInts[device->get_sample_rate()];
+        const double sampleRate = device->get_sample_rate();
         return std::chrono::duration<double>(bufferSize / sampleRate * factor);
     } else {
         return {};
@@ -117,7 +92,6 @@ static void drawSamplesTask(std::shared_ptr<stmdsp::device> device)
     if (!device)
         return;
 
-    const bool doLogger = logResults && logSamplesFile.good();
     const auto bufferTime = getBufferPeriod(device);
 
     std::unique_lock<std::timed_mutex> lockDraw (mutexDrawSamples, std::defer_lock);
@@ -138,7 +112,7 @@ static void drawSamplesTask(std::shared_ptr<stmdsp::device> device)
             lockDevice.unlock();
 
             addToQueue(drawSamplesQueue, chunk);
-            if (doLogger) {
+            if (logSamplesFile.good()) {
                 for (const auto& s : chunk)
                     logSamplesFile << s << '\n';
             }
@@ -147,7 +121,7 @@ static void drawSamplesTask(std::shared_ptr<stmdsp::device> device)
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
 
-        if (drawSamplesInput && popupRequestDraw) {
+        if (drawSamplesInput) {
             if (lockDevice.try_lock_for(std::chrono::milliseconds(1))) {
                 const auto chunk2 = tryReceiveChunk(device,
                     std::mem_fn(&stmdsp::device::continuous_read_input));
@@ -182,7 +156,7 @@ static void feedSigGenTask(std::shared_ptr<stmdsp::device> device)
 
     std::vector<int16_t> wavIntBuf (wavBuf.size());
 
-    while (genRunning) {
+    while (device->is_siggening()) {
         const auto next = std::chrono::high_resolution_clock::now() + delay;
 
         wavOutput.next(wavIntBuf.data(), wavIntBuf.size());
@@ -228,346 +202,60 @@ static void statusTask(std::shared_ptr<stmdsp::device> device)
     }
 }
 
-static void deviceConnect();
-static void deviceStart();
-static void deviceAlgorithmUpload();
-static void deviceAlgorithmUnload();
-static void deviceGenLoadList(std::string_view list);
-static void deviceGenLoadFormula(std::string_view list);
-
-void deviceRenderWidgets()
+void deviceLoadAudioFile(const std::string& file)
 {
-    static char *siggenBuffer = nullptr;
-    static int siggenOption = 0;
-
-    if (popupRequestSiggen) {
-        siggenBuffer = new char[65536];
-        *siggenBuffer = '\0';
-        ImGui::OpenPopup("siggen");
-        popupRequestSiggen = false;
-    } else if (popupRequestBuffer) {
-        ImGui::OpenPopup("buffer");
-        popupRequestBuffer = false;
-    } else if (popupRequestLog) {
-        ImGuiFileDialog::Instance()->OpenModal(
-            "ChooseFileLogGen", "Choose File", ".csv", ".");
-        popupRequestLog = false;
-    }
-
-    if (ImGui::BeginPopup("siggen")) {
-        if (ImGui::RadioButton("List", &siggenOption, 0))
-            siggenBuffer[0] = '\0';
-        ImGui::SameLine();
-        if (ImGui::RadioButton("Formula", &siggenOption, 1))
-            siggenBuffer[0] = '\0';
-        ImGui::SameLine();
-        if (ImGui::RadioButton("Audio File", &siggenOption, 2))
-            siggenBuffer[0] = '\0';
-
-        switch (siggenOption) {
-        case 0:
-            ImGui::Text("Enter a list of numbers:");
-            ImGui::PushStyleColor(ImGuiCol_FrameBg, {.8, .8, .8, 1});
-            ImGui::InputText("", siggenBuffer, 65536);
-            ImGui::PopStyleColor();
-            break;
-        case 1:
-            ImGui::Text("Enter a formula. f(x) = ");
-            ImGui::PushStyleColor(ImGuiCol_FrameBg, {.8, .8, .8, 1});
-            ImGui::InputText("", siggenBuffer, 65536);
-            ImGui::PopStyleColor();
-            break;
-        case 2:
-            if (ImGui::Button("Choose File")) {
-                // This dialog will override the siggen popup, closing it.
-                ImGuiFileDialog::Instance()->OpenModal(
-                    "ChooseFileLogGen", "Choose File", ".wav", ".");
-            }
-            break;
-        }
-
-        if (ImGui::Button("Cancel")) {
-            delete[] siggenBuffer;
-            ImGui::CloseCurrentPopup();
-        }
-
-        if (ImGui::Button("Save")) {
-            switch (siggenOption) {
-            case 0:
-                deviceGenLoadList(siggenBuffer);
-                break;
-            case 1:
-                deviceGenLoadFormula(siggenBuffer);
-                break;
-            case 2:
-                break;
-            }
-
-            delete[] siggenBuffer;
-            ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::EndPopup();
-    }
-
-    if (ImGui::BeginPopup("buffer")) {
-        static char bufferSizeStr[5] = "4096";
-        ImGui::Text("Please enter a new sample buffer size (100-4096):");
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, {.8, .8, .8, 1});
-        ImGui::InputText("", bufferSizeStr, sizeof(bufferSizeStr), ImGuiInputTextFlags_CharsDecimal);
-        ImGui::PopStyleColor();
-        if (ImGui::Button("Save")) {
-            if (m_device) {
-                int n = std::clamp(std::stoi(bufferSizeStr), 100, 4096);
-                m_device->continuous_set_buffer_size(n);
-            }
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel"))
-            ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-    }
-
-    if (ImGuiFileDialog::Instance()->Display("ChooseFileLogGen",
-                                             ImGuiWindowFlags_NoCollapse,
-                                             ImVec2(460, 540)))
-    {
-        if (ImGuiFileDialog::Instance()->IsOk()) {
-            auto filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
-            auto ext = filePathName.substr(filePathName.size() - 4);
-
-            if (ext.compare(".wav") == 0) {
-                wavOutput = wav::clip(filePathName.c_str());
-                if (wavOutput.valid())
-                    log("Audio file loaded.");
-                else
-                    log("Error: Bad WAV audio file.");
-
-                delete[] siggenBuffer;
-            } else if (ext.compare(".csv") == 0) {
-                logSamplesFile = std::ofstream(filePathName);
-                if (logSamplesFile.good())
-                    log("Log file ready.");
-            }
-        }
-
-        ImGuiFileDialog::Instance()->Close();
-    }
+    wavOutput = wav::clip(file);
+    if (wavOutput.valid())
+        log("Audio file loaded.");
+    else
+        log("Error: Bad WAV audio file.");
 }
 
-void deviceRenderDraw()
+void deviceLoadLogFile(const std::string& file)
 {
-    if (popupRequestDraw) {
-        static std::vector<stmdsp::dacsample_t> buffer;
-        static decltype(buffer.begin()) bufferCursor;
-        static std::vector<stmdsp::dacsample_t> bufferInput;
-        static decltype(bufferInput.begin()) bufferInputCursor;
-        static unsigned int yMinMax = 4095;
-
-        ImGui::Begin("draw", &popupRequestDraw);
-        ImGui::Text("Draw input ");
-        ImGui::SameLine();
-        ImGui::Checkbox("", &drawSamplesInput);
-        ImGui::SameLine();
-        ImGui::Text("Time: %0.3f sec", drawSamplesTimeframe);
-        ImGui::SameLine();
-        if (ImGui::Button("-", {30, 0})) {
-            drawSamplesTimeframe = std::max(drawSamplesTimeframe / 2., 0.0078125);
-            auto sr = sampleRateInts[m_device->get_sample_rate()];
-            auto tf = drawSamplesTimeframe;
-            drawSamplesBufferSize = std::round(sr * tf);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("+", {30, 0})) {
-            drawSamplesTimeframe = std::min(drawSamplesTimeframe * 2, 32.);
-            auto sr = sampleRateInts[m_device->get_sample_rate()];
-            auto tf = drawSamplesTimeframe;
-            drawSamplesBufferSize = std::round(sr * tf);
-        }
-        ImGui::SameLine();
-        ImGui::Text("Y: +/-%1.2fV", 3.3f * (static_cast<float>(yMinMax) / 4095.f));
-        ImGui::SameLine();
-        if (ImGui::Button(" - ", {30, 0})) {
-            yMinMax = std::max(63u, yMinMax >> 1);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(" + ", {30, 0})) {
-            yMinMax = std::min(4095u, (yMinMax << 1) | 1);
-        }
-
-        static unsigned long csize = 0;
-        if (buffer.size() != drawSamplesBufferSize) {
-            buffer.resize(drawSamplesBufferSize);
-            bufferInput.resize(drawSamplesBufferSize);
-            bufferCursor = buffer.begin();
-            bufferInputCursor = bufferInput.begin();
-            csize = drawSamplesBufferSize / (60. * drawSamplesTimeframe) * 1.025;
-        }
-
-        {
-            std::scoped_lock lock (mutexDrawSamples);
-            auto count = std::min(drawSamplesQueue.size(), csize);
-            for (auto i = count; i; --i) {
-                *bufferCursor = drawSamplesQueue.front();
-                drawSamplesQueue.pop_front();
-                if (++bufferCursor == buffer.end())
-                    bufferCursor = buffer.begin();
-            }
-            
-            if (drawSamplesInput) {
-                auto count = std::min(drawSamplesInputQueue.size(), csize);
-                for (auto i = count; i; --i) {
-                    *bufferInputCursor = drawSamplesInputQueue.front();
-                    drawSamplesInputQueue.pop_front();
-                    if (++bufferInputCursor == bufferInput.end())
-                        bufferInputCursor = bufferInput.begin();
-                }
-            }
-        }
-
-        auto drawList = ImGui::GetWindowDrawList();
-        ImVec2 p0 = ImGui::GetWindowPos();
-        auto size = ImGui::GetWindowSize();
-        p0.y += 65;
-        size.y -= 70;
-        drawList->AddRectFilled(p0, {p0.x + size.x, p0.y + size.y}, IM_COL32(0, 0, 0, 255));
-
-        const float di = static_cast<float>(buffer.size()) / size.x;
-        const float dx = std::ceil(size.x / static_cast<float>(buffer.size()));
-        ImVec2 pp = p0;
-        float i = 0;
-        while (pp.x < p0.x + size.x) {
-            unsigned int idx = i;
-            float n = std::clamp((buffer[idx] - 2048.) / yMinMax, -0.5, 0.5);
-            i += di;
-
-            ImVec2 next (pp.x + dx, p0.y + size.y * (0.5 - n));
-            drawList->AddLine(pp, next, ImGui::GetColorU32(IM_COL32(255, 0, 0, 255)));
-            pp = next;
-        }
-
-        if (drawSamplesInput) {
-            ImVec2 pp = p0;
-            float i = 0;
-            while (pp.x < p0.x + size.x) {
-                unsigned int idx = i;
-                float n = std::clamp((bufferInput[idx] - 2048.) / yMinMax, -0.5, 0.5);
-                i += di;
-
-                ImVec2 next (pp.x + dx, p0.y + size.y * (0.5 - n));
-                drawList->AddLine(pp, next, ImGui::GetColorU32(IM_COL32(0, 0, 255, 255)));
-                pp = next;
-            }
-        }
-
-        ImGui::End();
-    }
+    logSamplesFile = std::ofstream(file);
+    if (logSamplesFile.good())
+        log("Log file ready.");
+    else
+        log("Error: Could not open log file.");
 }
 
-void deviceRenderMenu()
+bool deviceGenStartToggle()
 {
-    if (ImGui::BeginMenu("Run")) {
-        bool isConnected = m_device ? true : false;
-        bool isRunning = isConnected && m_device->is_running();
-
-        static const char *connectLabel = "Connect";
-        if (ImGui::MenuItem(connectLabel, nullptr, false, !isConnected || (isConnected && !isRunning))) {
-            deviceConnect();
-            isConnected = m_device ? true : false;
-            connectLabel = isConnected ? "Disconnect" : "Connect";
+    if (m_device) {
+        bool running = m_device->is_siggening();
+        if (!running) {
+            if (wavOutput.valid())
+                std::thread(feedSigGenTask, m_device).detach();
+            else
+                m_device->siggen_start();
+            log("Generator started.");
+        } else {
+            m_device->siggen_stop();
+            log("Generator stopped.");
         }
 
-        ImGui::Separator();
-        static const char *startLabel = "Start";
-        if (ImGui::MenuItem(startLabel, nullptr, false, isConnected)) {
-            startLabel = isRunning ? "Start" : "Stop";
-            deviceStart();
-        }
-
-        if (ImGui::MenuItem("Upload algorithm", nullptr, false, isConnected && !isRunning))
-            deviceAlgorithmUpload();
-        if (ImGui::MenuItem("Unload algorithm", nullptr, false, isConnected && !isRunning))
-            deviceAlgorithmUnload();
-
-        ImGui::Separator();
-        if (!isConnected || isRunning)
-            ImGui::PushDisabled();
-        ImGui::Checkbox("Measure Code Time", &measureCodeTime);
-        if (ImGui::Checkbox("Draw samples", &drawSamples)) {
-            if (drawSamples)
-                popupRequestDraw = true;
-        }
-        if (ImGui::Checkbox("Log results...", &logResults)) {
-            if (logResults)
-                popupRequestLog = true;
-            else if (logSamplesFile.is_open())
-                logSamplesFile.close();
-        }
-        if (!isConnected || isRunning)
-            ImGui::PopDisabled();
-
-        if (ImGui::MenuItem("Set buffer size...", nullptr, false, isConnected && !isRunning)) {
-            popupRequestBuffer = true;
-        }
-        ImGui::Separator();
-        if (ImGui::MenuItem("Load signal generator", nullptr, false, isConnected && !m_device->is_siggening())) {
-            popupRequestSiggen = true;
-        }
-        static const char *startSiggenLabel = "Start signal generator";
-        if (ImGui::MenuItem(startSiggenLabel, nullptr, false, isConnected)) {
-            if (m_device) {
-                if (!genRunning) {
-                    genRunning = true;
-                    if (wavOutput.valid())
-                        std::thread(feedSigGenTask, m_device).detach();
-                    else
-                        m_device->siggen_start();
-                    log("Generator started.");
-                    startSiggenLabel = "Stop signal generator";
-                } else {
-                    genRunning = false;
-                    m_device->siggen_stop();
-                    log("Generator stopped.");
-                    startSiggenLabel = "Start signal generator";
-                }
-            }
-        }
-
-        ImGui::EndMenu();
+        return !running;
     }
+
+    return false;
 }
 
-void deviceRenderToolbar()
+void deviceUpdateDrawBufferSize(double timeframe)
 {
-    ImGui::SameLine();
-    if (ImGui::Button("Upload"))
-        deviceAlgorithmUpload();
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(100);
-
-    const bool enable = m_device && !m_device->is_running() && !m_device->is_siggening();
-    if (!enable)
-        ImGui::PushDisabled();
-    if (ImGui::BeginCombo("", sampleRatePreview)) {
-        for (unsigned int i = 0; i < sampleRateList.size(); ++i) {
-            if (ImGui::Selectable(sampleRateList[i])) {
-                sampleRatePreview = sampleRateList[i];
-                do {
-                    m_device->set_sample_rate(i);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                } while (m_device->get_sample_rate() != i);
-
-                drawSamplesBufferSize = std::round(sampleRateInts[i] * drawSamplesTimeframe);
-            }
-        }
-        ImGui::EndCombo();
-    }
-    if (!enable)
-        ImGui::PopDisabled();
+    drawSamplesBufferSize = std::round(
+        m_device->get_sample_rate() * timeframe);
 }
 
-void deviceConnect()
+void deviceSetSampleRate(unsigned int rate)
+{
+    do {
+        m_device->set_sample_rate(rate);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    } while (m_device->get_sample_rate() != rate);
+}
+
+bool deviceConnect()
 {
     static std::thread statusThread;
 
@@ -583,12 +271,10 @@ void deviceConnect()
 
             if (m_device) {
                 if (m_device->connected()) {
-                    auto sri = m_device->get_sample_rate();
-                    sampleRatePreview = sampleRateList[sri];
-                    drawSamplesBufferSize = std::round(sampleRateInts[sri] * drawSamplesTimeframe);
                     log("Connected!");
                     statusThread = std::thread(statusTask, m_device);
                     statusThread.detach();
+                    return true;
                 } else {
                     m_device.reset();
                     log("Failed to connect.");
@@ -604,9 +290,11 @@ void deviceConnect()
         m_device.reset();
         log("Disconnected.");
     }
+
+    return false;
 }
 
-void deviceStart()
+void deviceStart(bool measureCodeTime, bool logResults, bool drawSamples)
 {
     if (!m_device) {
         log("No device connected.");
@@ -619,9 +307,8 @@ void deviceStart()
             std::this_thread::sleep_for(std::chrono::microseconds(150));
             m_device->continuous_stop();
         }
-        if (logResults) {
+        if (logSamplesFile.good()) {
             logSamplesFile.close();
-            logResults = false;
             log("Log file saved and closed.");
         }
         log("Ready.");
@@ -713,5 +400,46 @@ void deviceGenLoadFormula(std::string_view formula)
     } else {
         log("Error: Bad formula.");
     }
+}
+
+void pullFromQueue(
+    std::deque<stmdsp::dacsample_t>& queue,
+    std::vector<stmdsp::dacsample_t>& buffer,
+    decltype(buffer.begin())& bufferCursor,
+    double timeframe)
+{
+    if (buffer.size() != drawSamplesBufferSize) {
+        buffer.resize(drawSamplesBufferSize);
+        bufferCursor = buffer.begin();
+    }
+
+    std::scoped_lock lock (mutexDrawSamples);
+
+    auto count = drawSamplesBufferSize / (60. * timeframe) * 1.025;
+    count = std::min(drawSamplesInputQueue.size(),
+        static_cast<std::size_t>(count));
+    for (auto i = count; i; --i) {
+        *bufferCursor = queue.front();
+        queue.pop_front();
+
+        if (++bufferCursor == buffer.end())
+            bufferCursor = buffer.begin();
+    }
+}
+
+void pullFromDrawQueue(
+    std::vector<stmdsp::dacsample_t>& buffer,
+    decltype(buffer.begin())& bufferCursor,
+    double timeframe)
+{
+    pullFromQueue(drawSamplesQueue, buffer, bufferCursor, timeframe);
+}
+
+void pullFromInputDrawQueue(
+    std::vector<stmdsp::dacsample_t>& buffer,
+    decltype(buffer.begin())& bufferCursor,
+    double timeframe)
+{
+    pullFromQueue(drawSamplesInputQueue, buffer, bufferCursor, timeframe);
 }
 
