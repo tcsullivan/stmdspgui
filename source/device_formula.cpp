@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-std::vector<stmdsp::dacsample_t> deviceGenLoadFormulaEval(const std::string_view formulaString)
+std::vector<stmdsp::dacsample_t> deviceGenLoadFormulaEval(const std::string& formulaString)
 {
     double x = 0;
 
@@ -16,13 +16,17 @@ std::vector<stmdsp::dacsample_t> deviceGenLoadFormulaEval(const std::string_view
     symbol_table.add_variable("x", x);
     symbol_table.add_constants();
     expression.register_symbol_table(symbol_table);
-    parser.compile(std::string(formulaString), expression);
+    parser.compile(formulaString, expression);
 
     std::vector<stmdsp::dacsample_t> samples (stmdsp::SAMPLES_MAX);
 
-    std::generate(samples.begin(), samples.end(),
-                  [&] { ++x; return static_cast<stmdsp::dacsample_t>(expression.value()); });
+    auto genFun = [&x, &expression] {
+        stmdsp::dacsample_t s = expression.value();
+        ++x;
+        return s;
+    };
 
+    std::generate(samples.begin(), samples.end(), genFun);
     return samples;
 }
 

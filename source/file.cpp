@@ -26,6 +26,8 @@
 #include <string>
 #include <vector>
 
+#include <SDL2/SDL.h>
+
 extern TextEditor editor;
 extern void log(const std::string& str);
 
@@ -133,8 +135,8 @@ void fileRenderMenu()
 
         ImGui::Separator();
         if (ImGui::MenuItem("Quit")) {
-            extern bool done;
-            done = true;
+            SDL_Event quitEvent (SDL_QUIT);
+            SDL_PushEvent(&quitEvent);
         }
 
         ImGui::EndMenu();

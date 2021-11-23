@@ -1,3 +1,4 @@
+#include "circular.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "ImGuiFileDialog.h"
@@ -5,6 +6,7 @@
 #include "stmdsp.hpp"
 
 #include <array>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -15,7 +17,7 @@ extern std::shared_ptr<stmdsp::device> m_device;
 void deviceAlgorithmUnload();
 void deviceAlgorithmUpload();
 bool deviceConnect();
-void deviceGenLoadFormula(std::string_view list);
+void deviceGenLoadFormula(const std::string& list);
 void deviceGenLoadList(std::string_view list);
 bool deviceGenStartToggle();
 void deviceLoadAudioFile(const std::string& file);
@@ -24,13 +26,11 @@ void deviceSetSampleRate(unsigned int index);
 void deviceSetInputDrawing(bool enabled);
 void deviceStart(bool measureCodeTime, bool logResults, bool drawSamples);
 void deviceUpdateDrawBufferSize(double timeframe);
-void pullFromDrawQueue(
-    std::vector<stmdsp::dacsample_t>& buffer,
-    decltype(buffer.begin())& bufferCursor,
+std::size_t pullFromDrawQueue(
+    CircularBuffer<std::vector, stmdsp::dacsample_t>& circ,
     double timeframe);
-void pullFromInputDrawQueue(
-    std::vector<stmdsp::dacsample_t>& buffer,
-    decltype(buffer.begin())& bufferCursor,
+std::size_t pullFromInputDrawQueue(
+    CircularBuffer<std::vector, stmdsp::dacsample_t>& circ,
     double timeframe);
 
 static std::string sampleRatePreview = "?";
@@ -56,11 +56,8 @@ void deviceRenderMenu()
     };
 
     if (ImGui::BeginMenu("Run")) {
-        const bool isConnected = m_device ? true : false;
-        const bool isRunning = isConnected && m_device->is_running();
-
         static std::string connectLabel ("Connect");
-        addMenuItem(connectLabel, !isConnected || !isRunning, [&] {
+        addMenuItem(connectLabel, !m_device || !m_device->is_running(), [&] {
                 if (deviceConnect()) {
                     connectLabel = "Disconnect";
                     sampleRatePreview =
@@ -68,8 +65,14 @@ void deviceRenderMenu()
                     deviceUpdateDrawBufferSize(drawSamplesTimeframe);
                 } else {
                     connectLabel = "Connect";
+                    measureCodeTime = false;
+                    logResults = false;
+                    drawSamples = false;
                 }
             });
+
+        const bool isConnected = m_device ? true : false;
+        const bool isRunning = isConnected && m_device->is_running();
 
         ImGui::Separator();
 
@@ -153,12 +156,11 @@ void deviceRenderToolbar()
 
 void deviceRenderWidgets()
 {
-    static std::string siggenInput;
+    static std::string siggenInput (32768, '\0');
     static int siggenOption = 0;
 
     if (popupRequestSiggen) {
         popupRequestSiggen = false;
-        siggenInput.clear();
         ImGui::OpenPopup("siggen");
     } else if (popupRequestBuffer) {
         popupRequestBuffer = false;
@@ -166,15 +168,19 @@ void deviceRenderWidgets()
     } else if (popupRequestLog) {
         popupRequestLog = false;
         ImGuiFileDialog::Instance()->OpenModal(
-            "ChooseFileLogGen", "Choose File", ".csv", ".");
+            "ChooseFileLog", "Choose File", ".csv", ".");
     }
 
     if (ImGui::BeginPopup("siggen")) {
-        if (ImGui::RadioButton("List", &siggenOption, 0))
-            siggenInput.clear();
+        if (ImGui::RadioButton("List", &siggenOption, 0)) {
+            siggenInput.resize(32768);
+            siggenInput[0] = '\0';
+        }
         ImGui::SameLine();
-        if (ImGui::RadioButton("Formula", &siggenOption, 1))
-            siggenInput.clear();
+        if (ImGui::RadioButton("Formula", &siggenOption, 1)) {
+            siggenInput.resize(1024);
+            siggenInput[0] = '\0';
+        }
         ImGui::SameLine();
         if (ImGui::RadioButton("Audio File", &siggenOption, 2))
             siggenInput.clear();
@@ -183,7 +189,7 @@ void deviceRenderWidgets()
             if (ImGui::Button("Choose File")) {
                 // This dialog will override the siggen popup, closing it.
                 ImGuiFileDialog::Instance()->OpenModal(
-                    "ChooseFileLogGen", "Choose File", ".wav", ".");
+                    "ChooseFileGen", "Choose File", ".wav", ".");
             }
         } else {
             ImGui::Text(siggenOption == 0 ? "Enter a list of numbers:"
@@ -201,10 +207,10 @@ void deviceRenderWidgets()
         if (ImGui::Button("Save")) {
             switch (siggenOption) {
             case 0:
-                deviceGenLoadList(siggenInput);
+                deviceGenLoadList(siggenInput.substr(0, siggenInput.find('\0')));
                 break;
             case 1:
-                deviceGenLoadFormula(siggenInput);
+                deviceGenLoadFormula(siggenInput.substr(0, siggenInput.find('\0')));
                 break;
             case 2:
                 break;
@@ -238,18 +244,27 @@ void deviceRenderWidgets()
         ImGui::EndPopup();
     }
 
-    if (ImGuiFileDialog::Instance()->Display("ChooseFileLogGen",
+    if (ImGuiFileDialog::Instance()->Display("ChooseFileLog",
                                              ImGuiWindowFlags_NoCollapse,
                                              ImVec2(460, 540)))
     {
         if (ImGuiFileDialog::Instance()->IsOk()) {
-            auto filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
-            auto ext = filePathName.substr(filePathName.size() - 4);
+            const auto filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
+            deviceLoadLogFile(filePathName);
+        } else {
+            logResults = false;
+        }
 
-            if (ext.compare(".wav") == 0)
-                deviceLoadAudioFile(filePathName);
-            else if (ext.compare(".csv") == 0)
-                deviceLoadLogFile(filePathName);
+        ImGuiFileDialog::Instance()->Close();
+    }
+
+    if (ImGuiFileDialog::Instance()->Display("ChooseFileGen",
+                                             ImGuiWindowFlags_NoCollapse,
+                                             ImVec2(460, 540)))
+    {
+        if (ImGuiFileDialog::Instance()->IsOk()) {
+            const auto filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
+            deviceLoadAudioFile(filePathName);
         }
 
         ImGuiFileDialog::Instance()->Close();
@@ -260,9 +275,9 @@ void deviceRenderDraw()
 {
     if (drawSamples) {
         static std::vector<stmdsp::dacsample_t> buffer;
-        static decltype(buffer.begin()) bufferCursor;
         static std::vector<stmdsp::dacsample_t> bufferInput;
-        static decltype(bufferInput.begin()) bufferInputCursor;
+        static auto bufferCirc = CircularBuffer(buffer);
+        static auto bufferInputCirc = CircularBuffer(bufferInput);
 
         static bool drawSamplesInput = false;
         static unsigned int yMinMax = 4095;
@@ -295,16 +310,50 @@ void deviceRenderDraw()
             yMinMax = std::min(4095u, (yMinMax << 1) | 1);
         }
 
-        pullFromDrawQueue(buffer, bufferCursor, drawSamplesTimeframe);
-        if (drawSamplesInput)
-            pullFromInputDrawQueue(bufferInput, bufferInputCursor, drawSamplesTimeframe);
+        auto newSize = pullFromDrawQueue(bufferCirc, drawSamplesTimeframe);
+        if (newSize > 0) {
+            buffer.resize(newSize);
+            bufferCirc = CircularBuffer(buffer);
+            pullFromDrawQueue(bufferCirc, drawSamplesTimeframe);
+        }
+
+        if (drawSamplesInput) {
+            auto newSize = pullFromInputDrawQueue(bufferInputCirc, drawSamplesTimeframe);
+            if (newSize > 0) {
+                bufferInput.resize(newSize);
+                bufferInputCirc = CircularBuffer(bufferInput);
+                pullFromInputDrawQueue(bufferInputCirc, drawSamplesTimeframe);
+            }
+        }
 
         auto drawList = ImGui::GetWindowDrawList();
         ImVec2 p0 = ImGui::GetWindowPos();
         auto size = ImGui::GetWindowSize();
         p0.y += 65;
         size.y -= 70;
-        drawList->AddRectFilled(p0, {p0.x + size.x, p0.y + size.y}, IM_COL32(0, 0, 0, 255));
+        drawList->AddRectFilled(p0, {p0.x + size.x, p0.y + size.y}, IM_COL32_BLACK);
+
+        const auto lcMinor = ImGui::GetColorU32(IM_COL32(40, 40, 40, 255));
+        const auto lcMajor = ImGui::GetColorU32(IM_COL32(140, 140, 140, 255));
+
+        {
+            const float yinc = (3. / 3.3) * size.y / 12.f;
+            const float center = p0.y + size.y / 2;
+            drawList->AddLine({p0.x, center}, {p0.x + size.x, center}, ImGui::GetColorU32(IM_COL32_WHITE));
+            for (int i = 1; i < 7; ++i) {
+                drawList->AddLine({p0.x, center + i * yinc}, {p0.x + size.x, center + i * yinc}, (i % 2) ? lcMinor : lcMajor);
+                drawList->AddLine({p0.x, center - i * yinc}, {p0.x + size.x, center - i * yinc}, (i % 2) ? lcMinor : lcMajor);
+            }
+        }
+        {
+            const float xinc = size.x / 16.f;
+            const float center = p0.x + size.x / 2;
+            drawList->AddLine({center, p0.y}, {center, p0.y + size.y}, ImGui::GetColorU32(IM_COL32_WHITE));
+            for (int i = 1; i < 8; ++i) {
+                drawList->AddLine({center + i * xinc, p0.y}, {center + i * xinc, p0.y + size.y}, (i % 2) ? lcMinor : lcMajor);
+                drawList->AddLine({center - i * xinc, p0.y}, {center - i * xinc, p0.y + size.y}, (i % 2) ? lcMinor : lcMajor);
+            }
+        }
 
         const float di = static_cast<float>(buffer.size()) / size.x;
         const float dx = std::ceil(size.x / static_cast<float>(buffer.size()));
@@ -332,6 +381,18 @@ void deviceRenderDraw()
                 drawList->AddLine(pp, next, ImGui::GetColorU32(IM_COL32(0, 0, 255, 255)));
                 pp = next;
             }
+        }
+
+        const auto mouse = ImGui::GetMousePos();
+        if (mouse.x > p0.x && mouse.x < p0.x + size.x &&
+            mouse.y > p0.y && mouse.y < p0.y + size.y)
+        {
+            const std::size_t si = (mouse.x - p0.x) / size.x * buffer.size();
+            const float s = buffer[si] / 4095.f * 6.6f - 3.3f;
+            char buf[12];
+            snprintf(buf, 16, "   %1.3fV", s);
+            drawList->AddLine({mouse.x, p0.y}, {mouse.x, p0.y + size.y}, IM_COL32(255, 255, 0, 255));
+            drawList->AddText(ImGui::GetMousePos(), IM_COL32(210, 210, 0, 255), buf);
         }
 
         ImGui::End();

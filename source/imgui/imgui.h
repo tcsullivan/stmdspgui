@@ -243,9 +243,9 @@ typedef unsigned long long  ImU64;  // 64-bit unsigned integer (post C++11)
 IM_MSVC_RUNTIME_CHECKS_OFF
 struct ImVec2
 {
-    float                                   x, y;
-    ImVec2()                                { x = y = 0.0f; }
-    ImVec2(float _x, float _y)              { x = _x; y = _y; }
+    float                                   x = 0.f, y = 0.f;
+    constexpr ImVec2()                      = default;
+    constexpr ImVec2(float _x, float _y)    : x(_x), y(_y) {}
     float  operator[] (size_t idx) const    { IM_ASSERT(idx <= 1); return (&x)[idx]; }    // We very rarely use this [] operator, the assert overhead is fine.
     float& operator[] (size_t idx)          { IM_ASSERT(idx <= 1); return (&x)[idx]; }    // We very rarely use this [] operator, the assert overhead is fine.
 #ifdef IM_VEC2_CLASS_EXTRA

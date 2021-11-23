@@ -24,7 +24,7 @@ $(OUTPUT): $(OFILES)
 
 clean:
 	@echo "  CLEAN"
-	@rm $(OFILES) $(OUTPUT)
+	@rm -f $(OFILES) $(OUTPUT)
 
 %.o: %.cpp
 	@echo "  CXX   " $<

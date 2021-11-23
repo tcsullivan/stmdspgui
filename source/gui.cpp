@@ -108,8 +108,10 @@ void guiRender(void (*func)())
    SDL_GL_SwapWindow(window);
 }
 
-void guiHandleEvents(bool& done)
+bool guiHandleEvents()
 {
+    bool done = false;
+
     for (SDL_Event event; SDL_PollEvent(&event);) {
         ImGui_ImplSDL2_ProcessEvent(&event);
         if (event.type == SDL_QUIT)
@@ -117,6 +119,8 @@ void guiHandleEvents(bool& done)
         if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window))
             done = true;
     }
+
+    return done;
 }
 
 void guiShutdown()
