@@ -1,3 +1,14 @@
+/**
+ * @file code.cpp
+ * @brief Functionality for compiling and disassembling source code.
+ *
+ * Copyright (C) 2021 Clyne Sullivan
+ *
+ * Distributed under the GNU GPL v3 or later. You should have received a copy of
+ * the GNU General Public License along with this program.
+ * If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "stmdsp.hpp"
 #include "stmdsp_code.hpp"
 
@@ -9,10 +20,13 @@
 #include <string>
 
 extern std::shared_ptr<stmdsp::device> m_device;
-extern void log(const std::string& str);
+void log(const std::string& str);
 
-std::string tempFileName; // device.cpp
+std::ifstream compileOpenBinaryFile();
+void compileEditorCode(const std::string& code);
+void disassembleCode();
 
+static std::string tempFileName;
 static std::string newTempFileName();
 static bool codeExecuteCommand(
     const std::string& command,
@@ -21,6 +35,14 @@ static void stringReplaceAll(
     std::string& str,
     const std::string& what,
     const std::string& with);
+
+std::ifstream compileOpenBinaryFile()
+{
+    if (!tempFileName.empty())
+        return std::ifstream(tempFileName + ".o");
+    else
+        return std::ifstream();
+}
 
 void compileEditorCode(const std::string& code)
 {

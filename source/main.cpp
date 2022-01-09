@@ -19,37 +19,31 @@
 
 #include <chrono>
 #include <cmath>
+#include <iostream>
 #include <string>
 #include <thread>
-
-extern ImFont *fontSans;
-extern ImFont *fontMono;
-
-bool guiInitialize();
-bool guiHandleEvents();
-void guiShutdown();
-void guiRender(void (*func)());
-
-void fileRenderMenu();
-void fileRenderDialog();
-void fileInit();
 
 void codeEditorInit();
 void codeRenderMenu();
 void codeRenderToolbar();
 void codeRenderWidgets();
-
 void deviceRenderDraw();
 void deviceRenderMenu();
 void deviceRenderToolbar();
 void deviceRenderWidgets();
+void fileRenderMenu();
+void fileRenderDialog();
+void fileInit();
+bool guiInitialize();
+bool guiHandleEvents();
+void guiShutdown();
+void guiRender();
+
+void log(const std::string& str);
 
 static LogView logView;
-
-void log(const std::string& str)
-{
-    logView.AddLog(str);
-}
+static ImFont *fontSans = nullptr;
+static ImFont *fontMono = nullptr;
 
 static void renderWindow();
 
@@ -57,6 +51,14 @@ int main(int, char **)
 {
     if (!guiInitialize())
         return -1;
+
+    auto& io = ImGui::GetIO();
+    fontSans = io.Fonts->AddFontFromFileTTF("fonts/Roboto-Regular.ttf", 20);
+    fontMono = io.Fonts->AddFontFromFileTTF("fonts/RobotoMono-Regular.ttf", 20);
+    if (fontSans == nullptr || fontMono == nullptr) {
+        std::cout << "Failed to load fonts!" << std::endl;
+        return -1;
+    }
 
     codeEditorInit();
     fileInit();
@@ -76,6 +78,11 @@ int main(int, char **)
 
     guiShutdown();
     return 0;
+}
+
+void log(const std::string& str)
+{
+    logView.AddLog(str);
 }
 
 void renderWindow()
@@ -124,9 +131,6 @@ void renderWindow()
     deviceRenderDraw();
 
     // Draw everything to the screen.
-    ImGui::Render();
-    guiRender([] {
-        ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
-    });
+    guiRender();
 }
 

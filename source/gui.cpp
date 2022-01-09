@@ -19,15 +19,17 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
 
-ImFont *fontSans = nullptr;
-ImFont *fontMono = nullptr;
-static ImGuiIO *io = nullptr;
+bool guiInitialize();
+void guiRender();
+bool guiHandleEvents();
+void guiShutdown();
+
 static SDL_Window *window = nullptr;
-static decltype(SDL_GL_CreateContext(nullptr)) gl_context;
+static SDL_GLContext gl_context;
 
 bool guiInitialize()
 {
-    if (SDL_Init(/*SDL_INIT_VIDEO*/0) != 0) {
+    if (SDL_Init(0) != 0) {
         printf("Error: %s\n", SDL_GetError());
         return false;
     }
@@ -42,6 +44,12 @@ bool guiInitialize()
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         WINDOW_WIDTH, WINDOW_HEIGHT,
         SDL_WINDOW_OPENGL /*| SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI*/);
+
+    if (window == nullptr) {
+        puts("Error: Could not create the window!");
+        return false;
+    }
+
     gl_context = SDL_GL_CreateContext(window);
     SDL_GL_MakeCurrent(window, gl_context);
     SDL_GL_SetSwapInterval(1); // Enable vsync
@@ -49,10 +57,7 @@ bool guiInitialize()
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    io = &ImGui::GetIO();
     //io->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    fontSans = io->Fonts->AddFontFromFileTTF("fonts/Roboto-Regular.ttf", 20);
-    fontMono = io->Fonts->AddFontFromFileTTF("fonts/RobotoMono-Regular.ttf", 20);
 
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL2_Init();
@@ -99,13 +104,19 @@ bool guiInitialize()
     return true;
 }
 
-void guiRender(void (*func)())
+void guiRender()
 {
-   glViewport(0, 0, (int)io->DisplaySize.x, (int)io->DisplaySize.y);
-   glClearColor(1, 1, 1, 1);
-   glClear(GL_COLOR_BUFFER_BIT);
-   func();
-   SDL_GL_SwapWindow(window);
+    ImGui::Render();
+
+    const auto& displaySize = ImGui::GetIO().DisplaySize;
+    const int sizeX = static_cast<int>(displaySize.x);
+    const int sizeY = static_cast<int>(displaySize.y);
+
+    glViewport(0, 0, sizeX, sizeY);
+    glClearColor(1, 1, 1, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
+    SDL_GL_SwapWindow(window);
 }
 
 bool guiHandleEvents()
@@ -114,10 +125,14 @@ bool guiHandleEvents()
 
     for (SDL_Event event; SDL_PollEvent(&event);) {
         ImGui_ImplSDL2_ProcessEvent(&event);
-        if (event.type == SDL_QUIT)
+        if (event.type == SDL_QUIT) {
             done = true;
-        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window))
-            done = true;
+        } else if (event.type == SDL_WINDOWEVENT) {
+            const auto& ew = event.window;
+            const auto wid = SDL_GetWindowID(window);
+            if (ew.event == SDL_WINDOWEVENT_CLOSE && ew.windowID == wid)
+                done = true;
+        }
     }
 
     return done;

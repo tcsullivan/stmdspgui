@@ -55,7 +55,7 @@ void deviceRenderMenu()
         }
     };
 
-    if (ImGui::BeginMenu("Run")) {
+    if (ImGui::BeginMenu("Device")) {
         static std::string connectLabel ("Connect");
         addMenuItem(connectLabel, !m_device || !m_device->is_running(), [&] {
                 if (deviceConnect()) {
@@ -199,11 +199,6 @@ void deviceRenderWidgets()
             ImGui::PopStyleColor();
         }
 
-        if (ImGui::Button("Cancel")) {
-            siggenInput.clear();
-            ImGui::CloseCurrentPopup();
-        }
-
         if (ImGui::Button("Save")) {
             switch (siggenOption) {
             case 0:
@@ -216,6 +211,12 @@ void deviceRenderWidgets()
                 break;
             }
 
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            siggenInput.clear();
             ImGui::CloseCurrentPopup();
         }
 
@@ -387,12 +388,22 @@ void deviceRenderDraw()
         if (mouse.x > p0.x && mouse.x < p0.x + size.x &&
             mouse.y > p0.y && mouse.y < p0.y + size.y)
         {
-            const std::size_t si = (mouse.x - p0.x) / size.x * buffer.size();
-            const float s = buffer[si] / 4095.f * 6.6f - 3.3f;
-            char buf[12];
-            snprintf(buf, 16, "   %1.3fV", s);
+            char buf[16];
             drawList->AddLine({mouse.x, p0.y}, {mouse.x, p0.y + size.y}, IM_COL32(255, 255, 0, 255));
-            drawList->AddText(ImGui::GetMousePos(), IM_COL32(210, 210, 0, 255), buf);
+
+            {
+                const std::size_t si = (mouse.x - p0.x) / size.x * buffer.size();
+                const float s = buffer[si] / 4095.f * 6.6f - 3.3f;
+                snprintf(buf, sizeof(buf), "   %1.3fV", s);
+                drawList->AddText(mouse, IM_COL32(255, 0, 0, 255), buf);
+            }
+
+            if (drawSamplesInput) {
+                const std::size_t si = (mouse.x - p0.x) / size.x * bufferInput.size();
+                const float s = bufferInput[si] / 4095.f * 6.6f - 3.3f;
+                snprintf(buf, sizeof(buf), "   %1.3fV", s);
+                drawList->AddText({mouse.x, mouse.y + 20}, IM_COL32(0, 0, 255, 255), buf);
+            }
         }
 
         ImGui::End();

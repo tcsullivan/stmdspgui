@@ -41,7 +41,7 @@ void LogView::Draw(const char* title, bool* p_open, ImGuiWindowFlags flags)
     }
 
     ImGui::Text("Log ");
-    ImGui::SameLine();
+    ImGui::SameLine(ImGui::GetWindowWidth() - 120);
     if (ImGui::Button("Clear"))
         Clear();
     ImGui::SameLine();

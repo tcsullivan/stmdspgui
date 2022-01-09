@@ -37,9 +37,9 @@ void codeEditorInit()
 void codeRenderMenu()
 {
     if (ImGui::BeginMenu("Code")) {
-        if (ImGui::MenuItem("Compile code"))
+        if (ImGui::MenuItem("Compile"))
             codeCompile();
-        if (ImGui::MenuItem("Show disassembly"))
+        if (ImGui::MenuItem("Disassemble"))
             codeDisassemble();
 
         ImGui::EndMenu();

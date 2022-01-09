@@ -30,9 +30,9 @@
 #include <thread>
 #include <vector>
 
-extern std::string tempFileName;
 extern void log(const std::string& str);
 extern std::vector<stmdsp::dacsample_t> deviceGenLoadFormulaEval(const std::string&);
+extern std::ifstream compileOpenBinaryFile();
 
 std::shared_ptr<stmdsp::device> m_device;
 
@@ -224,15 +224,21 @@ void deviceLoadLogFile(const std::string& file)
 bool deviceGenStartToggle()
 {
     if (m_device) {
-        bool running = m_device->is_siggening();
+        const bool running = m_device->is_siggening();
+
         if (!running) {
-            if (wavOutput.valid())
+            if (wavOutput.valid()) {
                 std::thread(feedSigGenTask, m_device).detach();
-            else
+            } else {
+                std::scoped_lock dlock (mutexDeviceLoad);
                 m_device->siggen_start();
+            }
             log("Generator started.");
         } else {
-            m_device->siggen_stop();
+            {
+                std::scoped_lock dlock (mutexDeviceLoad);
+                m_device->siggen_stop();
+            }
             log("Generator stopped.");
         }
 
@@ -332,7 +338,7 @@ void deviceAlgorithmUpload()
         log("No device connected.");
     } else if (m_device->is_running()) {
         log("Cannot upload algorithm while running.");
-    } else if (std::ifstream algo (tempFileName + ".o"); algo.is_open()) {
+    } else if (auto algo = compileOpenBinaryFile(); algo.is_open()) {
         std::ostringstream sstr;
         sstr << algo.rdbuf();
         auto str = sstr.str();

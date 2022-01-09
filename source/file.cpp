@@ -40,7 +40,7 @@ enum class FileAction {
 
 static FileAction fileAction = FileAction::None;
 static std::string fileCurrentPath;
-static std::vector<std::filesystem::path> fileTemplateList;
+static std::vector<std::filesystem::path> fileExampleList;
 
 static void saveCurrentFile()
 {
@@ -66,9 +66,9 @@ static void openNewFile()
     editor.SetText(stmdsp::file_content);
 }
 
-static std::vector<std::filesystem::path> fileScanTemplates()
+static std::vector<std::filesystem::path> fileScanExamples()
 {
-    const auto path = std::filesystem::current_path() / "templates";
+    const auto path = std::filesystem::current_path() / "examples";
     const std::filesystem::recursive_directory_iterator rdi (path);
 
     std::vector<std::filesystem::path> list;
@@ -83,7 +83,7 @@ static std::vector<std::filesystem::path> fileScanTemplates()
 
 void fileInit()
 {
-    fileTemplateList = fileScanTemplates();
+    fileExampleList = fileScanExamples();
     openNewFile();
 }
 
@@ -102,8 +102,8 @@ void fileRenderMenu()
                 "ChooseFileOpenSave", "Choose File", ".cpp", ".");
         }
 
-        if (ImGui::BeginMenu("Open Template")) {
-            for (const auto& file : fileTemplateList) {
+        if (ImGui::BeginMenu("Open Example")) {
+            for (const auto& file : fileExampleList) {
                 if (ImGui::MenuItem(file.filename().c_str())) {
                     fileCurrentPath = file.string();
                     openCurrentFile();
