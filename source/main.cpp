@@ -47,7 +47,7 @@ static ImFont *fontMono = nullptr;
 
 static void renderWindow();
 
-int main(int, char **)
+int main(int argc, char *argv[])
 {
     if (!guiInitialize())
         return -1;

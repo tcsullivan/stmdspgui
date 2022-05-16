@@ -104,7 +104,7 @@ void fileRenderMenu()
 
         if (ImGui::BeginMenu("Open Example")) {
             for (const auto& file : fileExampleList) {
-                if (ImGui::MenuItem(file.filename().c_str())) {
+                if (ImGui::MenuItem(file.filename().string().c_str())) {
                     fileCurrentPath = file.string();
                     openCurrentFile();
 
