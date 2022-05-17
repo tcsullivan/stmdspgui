@@ -1,8 +1,9 @@
 #linux: CXXFILES += source/serial/src/impl/unix.cc source/serial/src/impl/list_ports/list_ports_unix.cc
 #linux: LDFLAGS = -lSDL2 -lGL -lpthread
 
-CROSS = x86_64-w64-mingw32-
-CXX = $(CROSS)g++
+#CROSS = x86_64-w64-mingw32-
+#CXX = $(CROSS)g++
+CXX = g++
 
 CXXFILES := \
     source/serial/src/serial.cc \
