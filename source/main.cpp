@@ -47,7 +47,7 @@ static ImFont *fontMono = nullptr;
 template<bool first = false>
 static void renderWindow();
 
-int main(int argc, char *argv[])
+int main(int, char **)
 {
     if (!guiInitialize())
         return -1;
@@ -90,6 +90,8 @@ void log(const std::string& str)
 template<bool first>
 void renderWindow()
 {
+    static bool showHelp = false;
+
     // Start the new window frame and render the menu bar.
     ImGui_ImplOpenGL2_NewFrame();
     ImGui_ImplSDL2_NewFrame();
@@ -99,6 +101,25 @@ void renderWindow()
         fileRenderMenu();
         deviceRenderMenu();
         codeRenderMenu();
+
+        if (ImGui::BeginMenu("Help")) {
+            if (ImGui::MenuItem("Open wiki...")) {
+#ifdef STMDSP_WIN32
+                system("start "
+#else
+                system("xdg-open "
+#endif
+                    "https://code.bitgloo.com/clyne/stmdspgui/wiki");
+            }
+
+            ImGui::Separator();
+            if (ImGui::MenuItem("About")) {
+                showHelp = true;
+            }
+
+            ImGui::EndMenu();
+        }
+
         ImGui::EndMainMenuBar();
     }
 
@@ -138,6 +159,18 @@ void renderWindow()
     ImGui::PopFont();
 
     deviceRenderDraw();
+
+    if (showHelp) {
+        ImGui::Begin("help");
+
+        ImGui::Text("stmdspgui\nCompiled on " __DATE__ ".\n\nWritten by Clyne Sullivan.\n");
+
+        if (ImGui::Button("Close")) {
+            showHelp = false;
+        }
+
+        ImGui::End();
+    }
 
     // Draw everything to the screen.
     guiRender();
