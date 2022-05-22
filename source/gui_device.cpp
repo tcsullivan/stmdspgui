@@ -24,7 +24,8 @@ void deviceLoadAudioFile(const std::string& file);
 void deviceLoadLogFile(const std::string& file);
 void deviceSetSampleRate(unsigned int index);
 void deviceSetInputDrawing(bool enabled);
-void deviceStart(bool measureCodeTime, bool logResults, bool drawSamples);
+void deviceStart(bool logResults, bool drawSamples);
+void deviceStartMeasurement();
 void deviceUpdateDrawBufferSize(double timeframe);
 std::size_t pullFromDrawQueue(
     CircularBuffer<std::vector, stmdsp::dacsample_t>& circ,
@@ -47,6 +48,15 @@ static std::string getSampleRatePreview(unsigned int rate)
     return std::to_string(rate / 1000) + " kHz";
 }
 
+static std::string connectLabel ("Connect");
+void deviceRenderDisconnect()
+{
+    connectLabel = "Connect";
+    measureCodeTime = false;
+    logResults = false;
+    drawSamples = false;
+}
+
 void deviceRenderMenu()
 {
     auto addMenuItem = [](const std::string& label, bool enable, auto action) {
@@ -56,7 +66,6 @@ void deviceRenderMenu()
     };
 
     if (ImGui::BeginMenu("Device")) {
-        static std::string connectLabel ("Connect");
         addMenuItem(connectLabel, !m_device || !m_device->is_running(), [&] {
                 if (deviceConnect()) {
                     connectLabel = "Disconnect";
@@ -64,10 +73,7 @@ void deviceRenderMenu()
                         getSampleRatePreview(m_device->get_sample_rate());
                     deviceUpdateDrawBufferSize(drawSamplesTimeframe);
                 } else {
-                    connectLabel = "Connect";
-                    measureCodeTime = false;
-                    logResults = false;
-                    drawSamples = false;
+                    deviceRenderDisconnect();
                 }
             });
 
@@ -79,7 +85,7 @@ void deviceRenderMenu()
         static std::string startLabel ("Start");
         addMenuItem(startLabel, isConnected, [&] {
                 startLabel = isRunning ? "Start" : "Stop";
-                deviceStart(measureCodeTime, logResults, drawSamples);
+                deviceStart(logResults, drawSamples);
                 if (logResults && isRunning)
                     logResults = false;
             });
@@ -87,28 +93,25 @@ void deviceRenderMenu()
             deviceAlgorithmUpload);
         addMenuItem("Unload algorithm", isConnected && !isRunning,
             deviceAlgorithmUnload);
+        addMenuItem("Measure Code Time", isRunning, deviceStartMeasurement);
 
         ImGui::Separator();
         if (!isConnected || isRunning)
-            ImGui::PushDisabled();
+            ImGui::PushDisabled(); // Hey, pushing disabled!
 
-        ImGui::Checkbox("Measure Code Time", &measureCodeTime);
         ImGui::Checkbox("Draw samples", &drawSamples);
         if (ImGui::Checkbox("Log results...", &logResults)) {
             if (logResults)
                 popupRequestLog = true;
         }
+        addMenuItem("Set buffer size...", true, [] { popupRequestBuffer = true; });
 
         if (!isConnected || isRunning)
             ImGui::PopDisabled();
-
-        addMenuItem("Set buffer size...", isConnected && !isRunning,
-            [] { popupRequestBuffer = true; });
-
         ImGui::Separator();
 
         addMenuItem("Load signal generator",
-            isConnected && !m_device->is_siggening(),
+            isConnected && !m_device->is_siggening() && !m_device->is_running(),
             [] { popupRequestSiggen = true; });
 
         static std::string startSiggenLabel ("Start signal generator");
@@ -193,7 +196,7 @@ void deviceRenderWidgets()
             }
         } else {
             ImGui::Text(siggenOption == 0 ? "Enter a list of numbers:"
-                                          : "Enter a formula. f(x) = ");
+                                          : "Enter a formula. x = sample #, y = -1 to 1.\nf(x) = ");
             ImGui::PushStyleColor(ImGuiCol_FrameBg, {.8, .8, .8, 1});
             ImGui::InputText("", siggenInput.data(), siggenInput.size());
             ImGui::PopStyleColor();
@@ -286,8 +289,13 @@ void deviceRenderDraw()
         ImGui::Begin("draw", &drawSamples);
         ImGui::Text("Draw input ");
         ImGui::SameLine();
-        if (ImGui::Checkbox("", &drawSamplesInput))
+        if (ImGui::Checkbox("", &drawSamplesInput)) {
             deviceSetInputDrawing(drawSamplesInput);
+            if (drawSamplesInput) {
+                bufferCirc.reset(2048);
+                bufferInputCirc.reset(2048);
+            }
+        }
         ImGui::SameLine();
         ImGui::Text("Time: %0.3f sec", drawSamplesTimeframe);
         ImGui::SameLine();

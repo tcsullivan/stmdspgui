@@ -33,6 +33,7 @@
 extern void log(const std::string& str);
 extern std::vector<stmdsp::dacsample_t> deviceGenLoadFormulaEval(const std::string&);
 extern std::ifstream compileOpenBinaryFile();
+extern void deviceRenderDisconnect();
 
 std::shared_ptr<stmdsp::device> m_device;
 
@@ -45,9 +46,15 @@ static std::deque<stmdsp::dacsample_t> drawSamplesInputQueue;
 static bool drawSamplesInput = false;
 static unsigned int drawSamplesBufferSize = 1;
 
+bool deviceConnect();
+
 void deviceSetInputDrawing(bool enabled)
 {
     drawSamplesInput = enabled;
+    if (enabled) {
+        drawSamplesQueue.clear();
+        drawSamplesInputQueue.clear();
+    }
 }
 
 static void measureCodeTask(std::shared_ptr<stmdsp::device> device)
@@ -55,7 +62,7 @@ static void measureCodeTask(std::shared_ptr<stmdsp::device> device)
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
     if (device) {
-        const auto cycles = device->continuous_start_get_measurement();
+        const auto cycles = device->measurement_read();
         log(std::string("Execution time: ") + std::to_string(cycles) + " cycles.");
     }
 }
@@ -109,11 +116,21 @@ static void drawSamplesTask(std::shared_ptr<stmdsp::device> device)
         const auto next = std::chrono::high_resolution_clock::now() + bufferTime;
 
         if (lockDevice.try_lock_until(next)) {
-            const auto chunk = tryReceiveChunk(device,
+            std::vector<stmdsp::dacsample_t> chunk, chunk2;
+
+            chunk = tryReceiveChunk(device,
                 std::mem_fn(&stmdsp::device::continuous_read));
+            if (drawSamplesInput) {
+                chunk2 = tryReceiveChunk(device,
+                    std::mem_fn(&stmdsp::device::continuous_read_input));
+            }
+
             lockDevice.unlock();
 
             addToQueue(drawSamplesQueue, chunk);
+            if (drawSamplesInput)
+                addToQueue(drawSamplesInputQueue, chunk2);
+
             if (logSamplesFile.is_open()) {
                 for (const auto& s : chunk)
                     logSamplesFile << s << '\n';
@@ -121,16 +138,6 @@ static void drawSamplesTask(std::shared_ptr<stmdsp::device> device)
         } else {
             // Device must be busy, cooldown.
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        }
-
-        if (drawSamplesInput) {
-            if (lockDevice.try_lock_for(std::chrono::milliseconds(1))) {
-                const auto chunk2 = tryReceiveChunk(device,
-                    std::mem_fn(&stmdsp::device::continuous_read_input));
-                lockDevice.unlock();
-
-                addToQueue(drawSamplesInputQueue, chunk2);
-            }
         }
 
         std::this_thread::sleep_until(next);
@@ -192,6 +199,12 @@ static void statusTask(std::shared_ptr<stmdsp::device> device)
                 break;
             case stmdsp::Error::ConversionAborted:
                 log("Error: Algorithm unloaded, a fault occurred!");
+                break;
+            case stmdsp::Error::GUIDisconnect:
+                // Do GUI events for disconnect if device was lost.
+                deviceConnect();
+                deviceRenderDisconnect();
+                return;
                 break;
             default:
                 log("Error: Device had an issue...");
@@ -301,7 +314,7 @@ bool deviceConnect()
     return false;
 }
 
-void deviceStart(bool measureCodeTime, bool logResults, bool drawSamples)
+void deviceStart(bool logResults, bool drawSamples)
 {
     if (!m_device) {
         log("No device connected.");
@@ -320,15 +333,19 @@ void deviceStart(bool measureCodeTime, bool logResults, bool drawSamples)
         }
         log("Ready.");
     } else {
-        if (measureCodeTime) {
-            m_device->continuous_start_measure();
-            std::thread(measureCodeTask, m_device).detach();
-        } else {
-            m_device->continuous_start();
-            if (drawSamples || logResults || wavOutput.valid())
-                std::thread(drawSamplesTask, m_device).detach();
-        }
+        m_device->continuous_start();
+        if (drawSamples || logResults || wavOutput.valid())
+            std::thread(drawSamplesTask, m_device).detach();
+
         log("Running.");
+    }
+}
+
+void deviceStartMeasurement()
+{
+    if (m_device && m_device->is_running()) {
+        m_device->measurement_start();
+        std::thread(measureCodeTask, m_device).detach();
     }
 }
 
@@ -387,7 +404,7 @@ void deviceGenLoadList(const std::string_view list)
             }
         }
 
-        it = itend;
+        it = std::find_if(itend, list.cend(), isdigit);
     }
 
     if (it == list.cend()) {

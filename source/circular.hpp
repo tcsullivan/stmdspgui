@@ -21,7 +21,7 @@ public:
     CircularBuffer(Container<T>& container) :
         m_begin(std::begin(container)),
         m_end(std::end(container)),
-        m_current(std::begin(container)) {}
+        m_current(m_begin) {}
 
     void put(const T& value) noexcept {
         *m_current = value;
@@ -31,6 +31,11 @@ public:
 
     std::size_t size() const noexcept {
         return std::distance(m_begin, m_end);
+    }
+
+    void reset(const T& fill) noexcept {
+        std::fill(m_begin, m_end, fill);
+        m_current = m_begin;
     }
 
 private:

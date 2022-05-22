@@ -90,8 +90,7 @@ namespace stmdsp
                 m_serial->write(cmd.data(), cmd.size());
                 success = true;
             } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
+                handle_disconnect();
             }
         }
 
@@ -108,8 +107,7 @@ namespace stmdsp
                 m_serial->read(dest, dest_size);
                 success = true;
             } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
+                handle_disconnect();
             }
         }
 
@@ -158,12 +156,11 @@ namespace stmdsp
             m_is_running = true;
     }
 
-    void device::continuous_start_measure() {
-        if (try_command({'M'}))
-            m_is_running = true;
+    void device::measurement_start() {
+        try_command({'M'});
     }
 
-    uint32_t device::continuous_start_get_measurement() {
+    uint32_t device::measurement_read() {
         uint32_t count = 0;
         try_read({'m'}, reinterpret_cast<uint8_t *>(&count), sizeof(uint32_t));
         return count / 2;
@@ -193,8 +190,7 @@ namespace stmdsp
 
                 }
             } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
+                handle_disconnect();
             }
         }
 
@@ -225,8 +221,7 @@ namespace stmdsp
 
                 }
             } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
+                handle_disconnect();
             }
         }
 
@@ -251,8 +246,7 @@ namespace stmdsp
                     m_serial->write(request, 3);
                     m_serial->write((uint8_t *)buffer, size * sizeof(dacsample_t));
                 } catch (...) {
-                    m_serial.release();
-                    log("Lost connection!");
+                    handle_disconnect();
                 }
             } else {
                 try {
@@ -262,8 +256,7 @@ namespace stmdsp
                     else
                         m_serial->write((uint8_t *)buffer, size * sizeof(dacsample_t));
                 } catch (...) {
-                    m_serial.release();
-                    log("Lost connection!");
+                    handle_disconnect();
                 }
             }
 
@@ -295,8 +288,7 @@ namespace stmdsp
                 m_serial->write(request, 3);
                 m_serial->write(buffer, size);
             } catch (...) {
-                m_serial.release();
-                log("Lost connection!");
+                handle_disconnect();
             }
         }
     }
@@ -318,9 +310,19 @@ namespace stmdsp
             bool running = ret.first == RunStatus::Running;
             if (m_is_running != running)
                 m_is_running = running;
+        } else if (m_disconnect_error_flag) {
+            m_disconnect_error_flag = false;
+            return {RunStatus::Idle, Error::GUIDisconnect};
         }
 
         return ret;
     }
-}
+
+    void device::handle_disconnect()
+    {
+        m_disconnect_error_flag = true;
+        m_serial.release();
+        log("Lost connection!");
+    }
+} // namespace stmdsp
 

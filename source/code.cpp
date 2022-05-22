@@ -134,17 +134,16 @@ std::string newTempFileName()
 bool codeExecuteCommand(const std::string& command, const std::string& file)
 {
     bool success = system(command.c_str()) == 0;
-    if (success) {
-        if (std::ifstream output (file); output.good()) {
-            std::ostringstream sstr;
-            sstr << output.rdbuf();
-            log(sstr.str().c_str());
-        } else {
-            log("Could not read command output!");
-        }
 
-        std::filesystem::remove(file);
+    if (std::ifstream output (file); output.good()) {
+        std::ostringstream sstr;
+        sstr << output.rdbuf();
+        log(sstr.str().c_str());
+    } else {
+        log("Could not read command output!");
     }
+
+    std::filesystem::remove(file);
 
     return success;
 }

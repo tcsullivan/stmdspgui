@@ -63,12 +63,15 @@ namespace stmdsp
      */
     enum class Error : char {
         None = 0,
-        BadParam,         /* An invalid parameter was passed for a command. */
-        BadParamSize,     /* An invaild param. size was given for a command. */
-        BadUserCodeLoad,  /* Device failed to load the given algorithm. */
-        BadUserCodeSize,  /* The given algorithm is too large for the device. */
-        NotIdle,          /* An idle-only command was received while not Idle. */
-        ConversionAborted /* A conversion was aborted due to a fault. */
+        BadParam,            /* An invalid parameter was passed for a command. */
+        BadParamSize,        /* An invaild param. size was given for a command. */
+        BadUserCodeLoad,     /* Device failed to load the given algorithm. */
+        BadUserCodeSize,     /* The given algorithm is too large for the device. */
+        NotIdle,             /* An idle-only command was received while not Idle. */
+        ConversionAborted,   /* A conversion was aborted due to a fault. */
+        NotRunning,          /* A running-only command was received while not Running. */
+
+        GUIDisconnect = 100  /* The GUI lost connection with the device. */
     };
 
     /**
@@ -123,8 +126,8 @@ namespace stmdsp
         void continuous_start();
         void continuous_stop();
 
-        void continuous_start_measure();
-        uint32_t continuous_start_get_measurement();
+        void measurement_start();
+        uint32_t measurement_read();
 
         std::vector<adcsample_t> continuous_read();
         std::vector<adcsample_t> continuous_read_input();
@@ -149,11 +152,13 @@ namespace stmdsp
         unsigned int m_sample_rate = 0;
         bool m_is_siggening = false;
         bool m_is_running = false;
+        bool m_disconnect_error_flag = false;
 
         std::mutex m_lock;
 
         bool try_command(std::basic_string<uint8_t> data);
         bool try_read(std::basic_string<uint8_t> cmd, uint8_t *dest, unsigned int dest_size);
+        void handle_disconnect();
     };
 }
 
