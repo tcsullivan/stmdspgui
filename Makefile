@@ -19,7 +19,7 @@ LDFLAGS = -mwindows -lSDL2 -lopengl32 -lsetupapi -lole32
 OUTPUT := stmdspgui.exe
 else
 CXXFILES += source/serial/src/impl/unix.cc \
-            source/serial/src/impl/list_ports/list_ports_unix.cc
+            source/serial/src/impl/list_ports/list_ports_linux.cc
 LDFLAGS = -lSDL2 -lGL -lpthread
 OUTPUT := stmdspgui
 endif
