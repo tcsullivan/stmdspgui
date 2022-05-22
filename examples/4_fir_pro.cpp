@@ -10,7 +10,7 @@ typedef struct
 
 static void arm_fir_f32(const arm_fir_instance_f32 * S, float32_t * pSrc, float32_t * pDst, uint32_t blockSize);
 
-Sample *process_data(Samples samples)
+Sample* process_data(Samples samples)
 {
 	// 1. Define our array sizes (Be sure to set Run > Set buffer size... to below value!)
 	constexpr unsigned int buffer_size = 500;
@@ -34,18 +34,18 @@ Sample *process_data(Samples samples)
 	static float working[buffer_size + filter_size];
 
 	// 3. Scale 0-4095 interger sample values to +/- 1.0 floats
-	for (unsigned int i = 0; i < samples.size(); i++)
+	for (unsigned int i = 0; i < SIZE; i++)
 		input[i] = (samples[i] - 2048) / 2048.f;
 
 	// 4. Compute the FIR
 	arm_fir_instance_f32 fir { filter_size, working, filter };
-	arm_fir_f32(&fir, input, output, samples.size());
+	arm_fir_f32(&fir, input, output, SIZE);
 
 	// 5. Convert float results back to 0-4095 range for output
-	for (unsigned int i = 0; i < samples.size(); i++)
+	for (unsigned int i = 0; i < SIZE; i++)
 		samples[i] = output[i] * 2048.f + 2048;
 
-    return samples.data();
+    return samples;
 }
 
 // Below taken from the CMSIS DSP Library (find it on GitHub)

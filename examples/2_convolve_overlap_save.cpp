@@ -11,9 +11,9 @@
  * computation.
  */
 
-Sample *process_data(Samples samples)
+Sample* process_data(Samples samples)
 {
-    static Sample buffer[samples.size()];
+    static Samples buffer;
 
     constexpr unsigned int filter_size = 3;
 	float filter[filter_size] = {
@@ -23,7 +23,7 @@ Sample *process_data(Samples samples)
     // Keep a buffer of extra samples for overlap-save
     static Sample prev[filter_size];
 
-    for (int n = 0; n < samples.size(); n++) {
+    for (int n = 0; n < SIZE; n++) {
         buffer[n] = 0;
 
         for (int k = 0; k < filter_size; k++) {
@@ -40,7 +40,7 @@ Sample *process_data(Samples samples)
 
     // Save samples for the next convolution run
     for (int i = 0; i < filter_size; i++)
-        prev[i] = samples[samples.size() - filter_size + i];
+        prev[i] = samples[SIZE - filter_size + i];
 
     return buffer;
 }
