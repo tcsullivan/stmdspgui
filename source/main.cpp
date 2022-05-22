@@ -13,7 +13,6 @@
 #include "backends/imgui_impl_sdl.h"
 #include "backends/imgui_impl_opengl2.h"
 
-#include "config.h"
 #include "logview.h"
 #include "stmdsp.hpp"
 
@@ -26,7 +25,7 @@
 void codeEditorInit();
 void codeRenderMenu();
 void codeRenderToolbar();
-void codeRenderWidgets();
+void codeRenderWidgets(const ImVec2& size);
 void deviceRenderDraw();
 void deviceRenderMenu();
 void deviceRenderToolbar();
@@ -45,6 +44,7 @@ static LogView logView;
 static ImFont *fontSans = nullptr;
 static ImFont *fontMono = nullptr;
 
+template<bool first = false>
 static void renderWindow();
 
 int main(int, char **)
@@ -62,6 +62,8 @@ int main(int, char **)
 
     codeEditorInit();
     fileInit();
+
+    renderWindow<true>();
 
     while (1) {
         constexpr std::chrono::duration<double> fpsDelay (1. / 60.);
@@ -85,6 +87,7 @@ void log(const std::string& str)
     logView.AddLog(str);
 }
 
+template<bool first>
 void renderWindow()
 {
     // Start the new window frame and render the menu bar.
@@ -99,34 +102,40 @@ void renderWindow()
         ImGui::EndMainMenuBar();
     }
 
-    // Begin the main view which the controls will be drawn onto.
-    constexpr float LOGVIEW_HEIGHT = 200;
-    constexpr ImVec2 WINDOW_POS (0, 22);
-    constexpr ImVec2 WINDOW_SIZE (WINDOW_WIDTH, WINDOW_HEIGHT - 22 - LOGVIEW_HEIGHT);
-    ImGui::SetNextWindowPos(WINDOW_POS);
-    ImGui::SetNextWindowSize(WINDOW_SIZE);
-    ImGui::Begin("main", nullptr,
-                 ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDecoration |
-                     ImGuiWindowFlags_NoBringToFrontOnFocus);
-
-    // Render main controls (order is important).
-    {
-        ImGui::PushFont(fontSans);
-        codeRenderToolbar();
-        deviceRenderToolbar();
-        fileRenderDialog();
-        deviceRenderWidgets();
-        ImGui::PopFont();
-
-        ImGui::PushFont(fontMono);
-        codeRenderWidgets();
-        ImGui::SetNextWindowPos({0, WINDOW_HEIGHT - LOGVIEW_HEIGHT});
-        ImGui::SetNextWindowSize({WINDOW_WIDTH, LOGVIEW_HEIGHT});
-        logView.Draw("log", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBringToFrontOnFocus);
-        ImGui::PopFont();
+    if constexpr (first) {
+        ImGui::SetNextWindowSize({550, 440});
     }
 
+    constexpr int MainTopMargin = 22;
+    const auto& displaySize = ImGui::GetIO().DisplaySize;
+
+    ImGui::SetNextWindowPos({0, MainTopMargin});
+    ImGui::SetNextWindowSizeConstraints({displaySize.x, 150}, {displaySize.x, displaySize.y - 150});
+    ImGui::Begin("main", nullptr,
+                 ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoTitleBar |
+                     ImGuiWindowFlags_NoBringToFrontOnFocus);
+
+    const float mainWindowHeight = ImGui::GetWindowHeight();
+
+    ImGui::PushFont(fontSans);
+    codeRenderToolbar();
+    deviceRenderToolbar();
+    fileRenderDialog();
+    deviceRenderWidgets();
+    ImGui::PopFont();
+
+    ImGui::PushFont(fontMono);
+    codeRenderWidgets({displaySize.x - 16, mainWindowHeight - MainTopMargin - 24});
+    ImGui::PopFont();
+
     ImGui::End();
+
+    // The log window is kept separate from "main" to support panel resizing.
+    ImGui::PushFont(fontMono);
+    ImGui::SetNextWindowPos({0, mainWindowHeight + MainTopMargin});
+    ImGui::SetNextWindowSize({displaySize.x, displaySize.y - mainWindowHeight - MainTopMargin});
+    logView.Draw("log", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBringToFrontOnFocus);
+    ImGui::PopFont();
 
     deviceRenderDraw();
 

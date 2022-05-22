@@ -14,8 +14,6 @@
 #include "backends/imgui_impl_opengl2.h"
 #include "TextEditor.h"
 
-#include "config.h"
-
 #include <string>
 
 extern void compileEditorCode(const std::string& code);
@@ -52,9 +50,9 @@ void codeRenderToolbar()
         codeCompile();
 }
 
-void codeRenderWidgets()
+void codeRenderWidgets(const ImVec2& size)
 {
-    editor.Render("code", {WINDOW_WIDTH - 15, 450}, true);
+    editor.Render("code", size, true);
 }
 
 static void codeCompile()

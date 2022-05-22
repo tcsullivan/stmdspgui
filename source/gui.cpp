@@ -14,8 +14,6 @@
 #include "backends/imgui_impl_sdl.h"
 #include "backends/imgui_impl_opengl2.h"
 
-#include "config.h"
-
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
 
@@ -42,13 +40,15 @@ bool guiInitialize()
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
     window = SDL_CreateWindow("stmdsp gui",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        WINDOW_WIDTH, WINDOW_HEIGHT,
-        SDL_WINDOW_OPENGL /*| SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI*/);
+        550, 700,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE /*| SDL_WINDOW_ALLOW_HIGHDPI*/);
 
     if (window == nullptr) {
         puts("Error: Could not create the window!");
         return false;
     }
+
+    SDL_SetWindowMinimumSize(window, 320, 320);
 
     gl_context = SDL_GL_CreateContext(window);
     SDL_GL_MakeCurrent(window, gl_context);
