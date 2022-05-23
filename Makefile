@@ -20,7 +20,7 @@ OUTPUT := stmdspgui.exe
 CXXFLAGS := -std=c++20 -O2 \
             -Isource -Isource/imgui -Isource/stmdsp -Isource/serial/include \
             -Wall -Wextra -pedantic \
-            -DSTMDSP_WIN32 -Wa,-mbig-obj
+            -DSTMDSP_WIN32 -Wa,-mbig-obj -DSTMDSP_DISABLE_FORMULAS
 LDFLAGS = -mwindows -lSDL2 -lopengl32 -lsetupapi -lole32
 
 all: $(OUTPUT)
