@@ -4,4 +4,5 @@ stmdspgui
 stmdspgui.exe
 perf.data*
 *.o
+*.dll
 .*

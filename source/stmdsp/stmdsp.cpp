@@ -45,7 +45,9 @@ namespace stmdsp
     device::device(const std::string& file)
     {
         // This could throw!
-        m_serial.reset(new serial::Serial(file, 8'000'000, serial::Timeout::simpleTimeout(50)));
+	// Note: Windows needs a not-simple, positive timeout like this to
+	// ensure that reads block.
+        m_serial.reset(new serial::Serial(file, 921'600 /*8'000'000*/, serial::Timeout(1000, 1000, 1, 1000, 1)));
 
         // Test the ID command.
         m_serial->flush();

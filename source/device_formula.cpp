@@ -11,12 +11,25 @@
  */
 
 #include "stmdsp.hpp"
-#include "exprtk.hpp"
 
 #include <algorithm>
 #include <random>
 #include <string_view>
 #include <vector>
+
+#ifndef STMDSP_DISABLE_FORMULAS
+
+#define exprtk_disable_comments
+#define exprtk_disable_break_continue
+#define exprtk_disable_sc_andor
+#define exprtk_disable_return_statement
+#define exprtk_disable_enhanced_features
+//#define exprtk_disable_string_capabilities
+#define exprtk_disable_superscalar_unroll
+#define exprtk_disable_rtl_io_file
+#define exprtk_disable_rtl_vecops
+//#define exprtk_disable_caseinsensitivity
+#include "exprtk.hpp"
 
 static std::random_device randomDevice;
 
@@ -61,4 +74,13 @@ std::vector<stmdsp::dacsample_t> deviceGenLoadFormulaEval(const std::string& for
     std::generate(samples.begin(), samples.end(), genFun);
     return samples;
 }
+
+#else // no formula support
+
+std::vector<stmdsp::dacsample_t> deviceGenLoadFormulaEval(const std::string&)
+{
+    return {};
+}
+
+#endif // STMDSP_DISABLE_FORMULAS
 

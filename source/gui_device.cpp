@@ -28,11 +28,9 @@ void deviceStart(bool logResults, bool drawSamples);
 void deviceStartMeasurement();
 void deviceUpdateDrawBufferSize(double timeframe);
 std::size_t pullFromDrawQueue(
-    CircularBuffer<std::vector, stmdsp::dacsample_t>& circ,
-    double timeframe);
+    CircularBuffer<std::vector, stmdsp::dacsample_t>& circ);
 std::size_t pullFromInputDrawQueue(
-    CircularBuffer<std::vector, stmdsp::dacsample_t>& circ,
-    double timeframe);
+    CircularBuffer<std::vector, stmdsp::dacsample_t>& circ);
 
 static std::string sampleRatePreview = "?";
 static bool measureCodeTime = false;
@@ -319,19 +317,19 @@ void deviceRenderDraw()
             yMinMax = std::min(4095u, (yMinMax << 1) | 1);
         }
 
-        auto newSize = pullFromDrawQueue(bufferCirc, drawSamplesTimeframe);
+        auto newSize = pullFromDrawQueue(bufferCirc);
         if (newSize > 0) {
             buffer.resize(newSize);
             bufferCirc = CircularBuffer(buffer);
-            pullFromDrawQueue(bufferCirc, drawSamplesTimeframe);
+            pullFromDrawQueue(bufferCirc);
         }
 
         if (drawSamplesInput) {
-            auto newSize = pullFromInputDrawQueue(bufferInputCirc, drawSamplesTimeframe);
+            auto newSize = pullFromInputDrawQueue(bufferInputCirc);
             if (newSize > 0) {
                 bufferInput.resize(newSize);
                 bufferInputCirc = CircularBuffer(bufferInput);
-                pullFromInputDrawQueue(bufferInputCirc, drawSamplesTimeframe);
+                pullFromInputDrawQueue(bufferInputCirc);
             }
         }
 

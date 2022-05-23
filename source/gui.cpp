@@ -40,7 +40,7 @@ bool guiInitialize()
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
     window = SDL_CreateWindow("stmdsp gui",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        550, 700,
+        640, 700,
         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE /*| SDL_WINDOW_ALLOW_HIGHDPI*/);
 
     if (window == nullptr) {

@@ -103,8 +103,10 @@ static void drawSamplesTask(std::shared_ptr<stmdsp::device> device)
     if (!device)
         return;
 
-    const auto bufferTime = getBufferPeriod(device);
+    // This is the amount of time to wait between device reads.
+    const auto bufferTime = getBufferPeriod(device, 1);
 
+    // Adds the given chunk of samples to the given queue.
     const auto addToQueue = [](auto& queue, const auto& chunk) {
         std::scoped_lock lock (mutexDrawSamples);
         std::copy(chunk.cbegin(), chunk.cend(), std::back_inserter(queue));
@@ -136,8 +138,8 @@ static void drawSamplesTask(std::shared_ptr<stmdsp::device> device)
                     logSamplesFile << s << '\n';
             }
         } else {
-            // Device must be busy, cooldown.
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            // Device must be busy, back off for a bit.
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
 
         std::this_thread::sleep_until(next);
@@ -431,15 +433,27 @@ void deviceGenLoadFormula(const std::string& formula)
 
 std::size_t pullFromQueue(
     std::deque<stmdsp::dacsample_t>& queue,
-    CircularBuffer<std::vector, stmdsp::dacsample_t>& circ,
-    double timeframe)
+    CircularBuffer<std::vector, stmdsp::dacsample_t>& circ)
 {
+    // We know how big the circular buffer should be to hold enough samples to
+    // fill the current draw samples view.
+    // If the given buffer does not match this size, notify the caller.
+    // TODO this could be done better... drawSamplesBufferSize should be a GUI-
+    // only thing.
     if (circ.size() != drawSamplesBufferSize)
         return drawSamplesBufferSize;
 
     std::scoped_lock lock (mutexDrawSamples);
 
-    const auto desiredCount = drawSamplesBufferSize / (60. * timeframe) * 1.025;
+    // The render code will draw all of the new samples we add to the buffer.
+    // So, we must provide a certain amount of samples at a time to make the
+    // render appear smooth.
+    // The 1.025 factor keeps us on top of the stream; don't want to fall
+    // behind.
+    const double FPS = ImGui::GetIO().Framerate;
+    const auto desiredCount = m_device->get_sample_rate() / FPS;
+
+    // Transfer from the queue to the render buffer.
     auto count = std::min(queue.size(), static_cast<std::size_t>(desiredCount));
     while (count--) {
         circ.put(queue.front());
@@ -449,17 +463,19 @@ std::size_t pullFromQueue(
     return 0;
 }
 
+/**
+ * Pulls a render frame's worth of samples from the draw samples queue, adding
+ * the samples to the given buffer.
+ */
 std::size_t pullFromDrawQueue(
-    CircularBuffer<std::vector, stmdsp::dacsample_t>& circ,
-    double timeframe)
+    CircularBuffer<std::vector, stmdsp::dacsample_t>& circ)
 {
-    return pullFromQueue(drawSamplesQueue, circ, timeframe);
+    return pullFromQueue(drawSamplesQueue, circ);
 }
 
 std::size_t pullFromInputDrawQueue(
-    CircularBuffer<std::vector, stmdsp::dacsample_t>& circ,
-    double timeframe)
+    CircularBuffer<std::vector, stmdsp::dacsample_t>& circ)
 {
-    return pullFromQueue(drawSamplesInputQueue, circ, timeframe);
+    return pullFromQueue(drawSamplesInputQueue, circ);
 }
 
