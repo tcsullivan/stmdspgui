@@ -13,104 +13,138 @@
 #include "backends/imgui_impl_sdl.h"
 #include "backends/imgui_impl_opengl2.h"
 
-#include "config.h"
 #include "logview.h"
 #include "stmdsp.hpp"
 
+#include <chrono>
+#include <cmath>
+#include <iostream>
 #include <string>
+#include <thread>
 
-// Externs
-extern ImFont *fontSans;
-extern ImFont *fontMono;
+void codeEditorInit();
+void codeRenderMenu();
+void codeRenderToolbar();
+void codeRenderWidgets(const ImVec2& size);
+void deviceRenderDraw();
+void deviceRenderMenu();
+void deviceRenderToolbar();
+void deviceRenderWidgets();
+void fileRenderMenu();
+void fileRenderDialog();
+void fileInit();
+bool guiInitialize();
+bool guiHandleEvents();
+void guiShutdown();
+void guiRender();
+void helpRenderMenu();
+void helpRenderDialog();
 
-extern bool guiInitialize();
-extern void guiHandleEvents(bool& done);
-extern void guiShutdown();
-extern void guiRender(void (*func)());
-
-extern void fileRenderMenu();
-extern void fileRenderDialog();
-extern void fileScanTemplates();
-
-extern void codeEditorInit();
-extern void codeRenderMenu();
-extern void codeRenderToolbar();
-extern void codeRenderWidgets();
-
-extern void deviceRenderDraw();
-extern void deviceRenderMenu();
-extern void deviceRenderToolbar();
-extern void deviceRenderWidgets();
-
-// Globals that live here
-bool done = false;
-stmdsp::device *m_device = nullptr;
+void log(const std::string& str);
 
 static LogView logView;
+static ImFont *fontSans = nullptr;
+static ImFont *fontMono = nullptr;
 
-void log(const std::string& str)
-{
-    logView.AddLog(str);
-}
+template<bool first = false>
+static void renderWindow();
 
 int main(int, char **)
 {
     if (!guiInitialize())
         return -1;
 
-    fileScanTemplates();
+    auto& io = ImGui::GetIO();
+    fontSans = io.Fonts->AddFontFromFileTTF("fonts/Roboto-Regular.ttf", 20);
+    fontMono = io.Fonts->AddFontFromFileTTF("fonts/RobotoMono-Regular.ttf", 20);
+    if (fontSans == nullptr || fontMono == nullptr) {
+        std::cout << "Failed to load fonts!" << std::endl;
+        return -1;
+    }
+
     codeEditorInit();
+    fileInit();
 
-    while (!done) {
-        guiHandleEvents(done);
+    renderWindow<true>();
 
-        // Start the new window frame and render the menu bar.
-        ImGui_ImplOpenGL2_NewFrame();
-        ImGui_ImplSDL2_NewFrame();
-        ImGui::NewFrame();
+    while (1) {
+        constexpr std::chrono::duration<double> fpsDelay (1. / 60.);
+        const auto endTime = std::chrono::steady_clock::now() + fpsDelay;
 
-        if (ImGui::BeginMainMenuBar()) {
-            fileRenderMenu();
-            deviceRenderMenu();
-            codeRenderMenu();
-            ImGui::EndMainMenuBar();
+        const bool isDone = guiHandleEvents();
+        if (!isDone) {
+            renderWindow();
+            std::this_thread::sleep_until(endTime);
+        } else {
+            break;
         }
-
-        // Begin the main view which the controls will be drawn onto.
-        ImGui::SetNextWindowPos({0, 22});
-        ImGui::SetNextWindowSize({WINDOW_WIDTH, WINDOW_HEIGHT - 22 - 200});
-        ImGui::Begin("main", nullptr,
-                     ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDecoration |
-                         ImGuiWindowFlags_NoBringToFrontOnFocus);
-
-        // Render main controls (order is important).
-        ImGui::PushFont(fontSans);
-        codeRenderToolbar();
-        deviceRenderToolbar();
-        fileRenderDialog();
-        deviceRenderWidgets();
-        ImGui::PopFont();
-
-        ImGui::PushFont(fontMono);
-        codeRenderWidgets();
-        ImGui::SetNextWindowPos({0, WINDOW_HEIGHT - 200});
-        ImGui::SetNextWindowSize({WINDOW_WIDTH, 200});
-        logView.Draw("log", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBringToFrontOnFocus);
-        ImGui::PopFont();
-
-        // Finish main view rendering.
-        ImGui::End();
-
-        deviceRenderDraw();
-
-        // Draw everything to the screen.
-        ImGui::Render();
-        guiRender([] {
-            ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
-        });
     }
 
     guiShutdown();
     return 0;
+}
+
+void log(const std::string& str)
+{
+    logView.AddLog(str);
+}
+
+template<bool first>
+void renderWindow()
+{
+    // Start the new window frame and render the menu bar.
+    ImGui_ImplOpenGL2_NewFrame();
+    ImGui_ImplSDL2_NewFrame();
+    ImGui::NewFrame();
+
+    if (ImGui::BeginMainMenuBar()) {
+        fileRenderMenu();
+        deviceRenderMenu();
+        codeRenderMenu();
+	helpRenderMenu();
+
+        ImGui::EndMainMenuBar();
+    }
+
+    if constexpr (first) {
+        ImGui::SetNextWindowSize({550, 440});
+    }
+
+    constexpr int MainTopMargin = 22;
+    const auto& displaySize = ImGui::GetIO().DisplaySize;
+
+    ImGui::SetNextWindowPos({0, MainTopMargin});
+    ImGui::SetNextWindowSizeConstraints({displaySize.x, 150}, {displaySize.x, displaySize.y - 150});
+    ImGui::Begin("main", nullptr,
+                 ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoTitleBar |
+                     ImGuiWindowFlags_NoBringToFrontOnFocus);
+
+    const float mainWindowHeight = ImGui::GetWindowHeight();
+
+    ImGui::PushFont(fontSans);
+    codeRenderToolbar();
+    deviceRenderToolbar();
+    fileRenderDialog();
+    helpRenderDialog();
+    deviceRenderWidgets();
+    ImGui::PopFont();
+
+    ImGui::PushFont(fontMono);
+    codeRenderWidgets({displaySize.x - 16, mainWindowHeight - MainTopMargin - 24});
+    ImGui::PopFont();
+
+    ImGui::End();
+
+    // The log window is kept separate from "main" to support panel resizing.
+    ImGui::PushFont(fontMono);
+    ImGui::SetNextWindowPos({0, mainWindowHeight + MainTopMargin});
+    ImGui::SetNextWindowSize({displaySize.x, displaySize.y - mainWindowHeight - MainTopMargin});
+    logView.Draw("log", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBringToFrontOnFocus);
+    ImGui::PopFont();
+
+    deviceRenderDraw();
+
+    // Draw everything to the screen.
+    guiRender();
 }
 

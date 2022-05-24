@@ -1,6 +1,6 @@
 /**
  * @file code.cpp
- * @brief Contains code for algorithm-code-related UI elements and logic.
+ * @brief Functionality for compiling and disassembling source code.
  *
  * Copyright (C) 2021 Clyne Sullivan
  *
@@ -9,12 +9,6 @@
  * If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "imgui.h"
-#include "backends/imgui_impl_sdl.h"
-#include "backends/imgui_impl_opengl2.h"
-#include "TextEditor.h"
-
-#include "config.h"
 #include "stmdsp.hpp"
 #include "stmdsp_code.hpp"
 
@@ -22,87 +16,63 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 
-extern stmdsp::device *m_device;
+extern std::shared_ptr<stmdsp::device> m_device;
+void log(const std::string& str);
 
-extern void log(const std::string& str);
+std::ifstream compileOpenBinaryFile();
+void compileEditorCode(const std::string& code);
+void disassembleCode();
 
-TextEditor editor; // file.cpp
-std::string tempFileName; // device.cpp
-static std::string editorCompiled;
-
+static std::string tempFileName;
 static std::string newTempFileName();
-static void compileEditorCode();
-static void disassembleCode();
+static bool codeExecuteCommand(
+    const std::string& command,
+    const std::string& file);
+static void stringReplaceAll(
+    std::string& str,
+    const std::string& what,
+    const std::string& with);
 
-void codeEditorInit()
+std::ifstream compileOpenBinaryFile()
 {
-    editor.SetLanguageDefinition(TextEditor::LanguageDefinition::CPlusPlus());
-    editor.SetPalette(TextEditor::GetLightPalette());
+    if (!tempFileName.empty())
+        return std::ifstream(tempFileName + ".o");
+    else
+        return std::ifstream();
 }
 
-void codeRenderMenu()
-{
-    if (ImGui::BeginMenu("Code")) {
-        if (ImGui::MenuItem("Compile code"))
-            compileEditorCode();
-        if (ImGui::MenuItem("Show disassembly"))
-            disassembleCode();
-        ImGui::EndMenu();
-    }
-}
-
-void codeRenderToolbar()
-{
-    if (ImGui::Button("Compile"))
-        compileEditorCode();
-}
-
-void codeRenderWidgets()
-{
-    editor.Render("code", {WINDOW_WIDTH - 15, 450}, true);
-}
-
-void compileEditorCode()
+void compileEditorCode(const std::string& code)
 {
     log("Compiling...");
 
-    // Scrap cached build if there are changes
-    if (editor.GetText().compare(editorCompiled) != 0) {
+    if (tempFileName.empty()) {
+        tempFileName = newTempFileName();
+    } else {
         std::filesystem::remove(tempFileName + ".o");
         std::filesystem::remove(tempFileName + ".orig.o");
     }
 
-    stmdsp::platform platform;
-    if (m_device != nullptr) {
-        platform = m_device->get_platform();
-    } else {
-        // Assume a default.
-        platform = stmdsp::platform::L4;
-    }
-
-    if (tempFileName.size() == 0)
-        tempFileName = newTempFileName();
+    const auto platform = m_device ? m_device->get_platform()
+                                   : stmdsp::platform::L4;
 
     {
         std::ofstream file (tempFileName, std::ios::trunc | std::ios::binary);
 
-        auto file_text = platform == stmdsp::platform::L4 ? stmdsp::file_header_l4
-                                                          : stmdsp::file_header_h7;
-        auto samples_text = std::to_string(m_device ? m_device->get_buffer_size()
-                                                    : stmdsp::SAMPLES_MAX);
-        for (std::size_t i = 0; (i = file_text.find("$0", i)) != std::string::npos;) {
-            file_text.replace(i, 2, samples_text);
-            i += 2;
-        }
+        auto file_text =
+            platform == stmdsp::platform::L4 ? stmdsp::file_header_l4
+                                             : stmdsp::file_header_h7;
+        const auto buffer_size = m_device ? m_device->get_buffer_size()
+                                          : stmdsp::SAMPLES_MAX;
 
-        file << file_text;
-        file << "\n";
-        file << editor.GetText();
+        stringReplaceAll(file_text, "$0", std::to_string(buffer_size));
+
+        file << file_text << '\n' << code;
     }
 
-    constexpr const char *script_ext =
+    const auto scriptFile = tempFileName +
 #ifndef STMDSP_WIN32
         ".sh";
 #else
@@ -110,79 +80,80 @@ void compileEditorCode()
 #endif
 
     {
-        std::ofstream makefile (tempFileName + script_ext, std::ios::binary);
-        auto make_text = platform == stmdsp::platform::L4 ? stmdsp::makefile_text_l4
-                                                          : stmdsp::makefile_text_h7;
-        auto cwd = std::filesystem::current_path().string();
-        for (std::size_t i = 0; (i = make_text.find("$0", i)) != std::string::npos;) {
-            make_text.replace(i, 2, tempFileName);
-            i += 2;
-        }
-        for (std::size_t i = 0; (i = make_text.find("$1", i)) != std::string::npos;) {
-            make_text.replace(i, 2, cwd);
-            i += 2;
-        }
+        std::ofstream makefile (scriptFile, std::ios::binary);
+        auto make_text =
+            platform == stmdsp::platform::L4 ? stmdsp::makefile_text_l4
+                                             : stmdsp::makefile_text_h7;
+
+        stringReplaceAll(make_text, "$0", tempFileName);
+        stringReplaceAll(make_text, "$1",
+                         std::filesystem::current_path().string());
 
         makefile << make_text;
     }
 
-    auto makeOutput = tempFileName + script_ext + ".log";
-    auto makeCommand = tempFileName + script_ext + " > " + makeOutput + " 2>&1";
-
 #ifndef STMDSP_WIN32
-    system((std::string("chmod +x ") + tempFileName + script_ext).c_str());
+    system((std::string("chmod +x ") + scriptFile).c_str());
 #endif
-    int result = system(makeCommand.c_str());
-    std::ifstream result_file (makeOutput);
-    std::ostringstream sstr;
-    sstr << result_file.rdbuf();
-    log(sstr.str().c_str());
+
+    const auto makeOutput = scriptFile + ".log";
+    const auto makeCommand = scriptFile + " > " + makeOutput + " 2>&1";
+    if (codeExecuteCommand(makeCommand, makeOutput))
+        log("Compilation succeeded.");
+    else
+        log("Compilation failed.");
 
     std::filesystem::remove(tempFileName);
-    std::filesystem::remove(tempFileName + script_ext);
-    std::filesystem::remove(makeOutput);
-
-    if (result == 0) {
-        editorCompiled = editor.GetText();
-        log("Compilation succeeded.");
-    } else {
-        log("Compilation failed.");
-    }
+    std::filesystem::remove(scriptFile);
 }
 
 void disassembleCode()
 {
     log("Disassembling...");
 
-    if (tempFileName.size() == 0 || editor.GetText().compare(editorCompiled) != 0) {
-        compileEditorCode();
-    }
+    //if (tempFileName.empty())
+    //    compileEditorCode();
 
-    auto output = tempFileName + ".asm.log";
-    auto command = std::string("arm-none-eabi-objdump -d --no-show-raw-insn ") +
+    const auto output = tempFileName + ".asm.log";
+    const auto command =
+        std::string("arm-none-eabi-objdump -d --no-show-raw-insn ") +
         tempFileName + ".orig.o > " + output + " 2>&1";
-    
-    if (system(command.c_str()) == 0) {
-        {
-            std::ifstream result_file (output);
-            std::ostringstream sstr;
-            sstr << result_file.rdbuf();
-            log(sstr.str().c_str());
-        }
 
-        ImGui::OpenPopup("compile");
-        std::filesystem::remove(output);
-
+    if (codeExecuteCommand(command, output))
         log("Ready.");
-    } else {
+    else
         log("Failed to load disassembly.");
-    }
 }
 
 std::string newTempFileName()
 {
-    auto tempPath = std::filesystem::temp_directory_path();
-    tempPath /= "stmdspgui_build";
-    return tempPath.string();
+    const auto path = std::filesystem::temp_directory_path() / "stmdspgui_build";
+    return path.string();
 }
+
+bool codeExecuteCommand(const std::string& command, const std::string& file)
+{
+    bool success = system(command.c_str()) == 0;
+
+    if (std::ifstream output (file); output.good()) {
+        std::ostringstream sstr;
+        sstr << output.rdbuf();
+        log(sstr.str().c_str());
+    } else {
+        log("Could not read command output!");
+    }
+
+    std::filesystem::remove(file);
+
+    return success;
+}
+
+void stringReplaceAll(std::string& str, const std::string& what, const std::string& with)
+{
+    std::size_t i;
+    while ((i = str.find(what)) != std::string::npos) {
+        str.replace(i, what.size(), with);
+        i += what.size();
+    }
+};
 

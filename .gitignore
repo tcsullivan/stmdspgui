@@ -1,5 +1,9 @@
+build/
+openocd/
 imgui.ini
 stmdspgui
 stmdspgui.exe
+perf.data*
 *.o
+*.dll
 .*

@@ -7,10 +7,10 @@
  * transient response is not calculated.
  */
 
-Sample *process_data(Samples samples)
+Sample* process_data(Samples samples)
 {
-    // Define our output buffer. SIZE is the largest size of the 'samples' buffer.
-    static Sample buffer[samples.size()];
+    // Define our output buffer.
+    static Samples buffer;
 
     // Define our filter
     constexpr unsigned int filter_size = 3;
@@ -19,7 +19,8 @@ Sample *process_data(Samples samples)
     };
 
     // Begin convolving:
-    for (int n = 0; n < samples.size() - (filter_size - 1); n++) {
+    // SIZE is the size of the sample buffer.
+    for (int n = 0; n < SIZE - (filter_size - 1); n++) {
         buffer[n] = 0;
         for (int k = 0; k < filter_size; k++)
             buffer[n] += samples[n + k] * filter[k];

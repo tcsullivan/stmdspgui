@@ -10,23 +10,24 @@
  */
 
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "backends/imgui_impl_sdl.h"
 #include "backends/imgui_impl_opengl2.h"
-
-#include "config.h"
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
 
-ImFont *fontSans = nullptr;
-ImFont *fontMono = nullptr;
-static ImGuiIO *io = nullptr;
+bool guiInitialize();
+void guiRender();
+bool guiHandleEvents();
+void guiShutdown();
+
 static SDL_Window *window = nullptr;
-static decltype(SDL_GL_CreateContext(nullptr)) gl_context;
+static SDL_GLContext gl_context;
 
 bool guiInitialize()
 {
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+    if (SDL_Init(0) != 0) {
         printf("Error: %s\n", SDL_GetError());
         return false;
     }
@@ -39,8 +40,16 @@ bool guiInitialize()
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
     window = SDL_CreateWindow("stmdsp gui",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        WINDOW_WIDTH, WINDOW_HEIGHT,
-        SDL_WINDOW_OPENGL /*| SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI*/);
+        640, 700,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE /*| SDL_WINDOW_ALLOW_HIGHDPI*/);
+
+    if (window == nullptr) {
+        puts("Error: Could not create the window!");
+        return false;
+    }
+
+    SDL_SetWindowMinimumSize(window, 320, 320);
+
     gl_context = SDL_GL_CreateContext(window);
     SDL_GL_MakeCurrent(window, gl_context);
     SDL_GL_SetSwapInterval(1); // Enable vsync
@@ -48,37 +57,85 @@ bool guiInitialize()
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    io = &ImGui::GetIO();
-    io->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    fontSans = io->Fonts->AddFontFromFileTTF("fonts/Roboto-Regular.ttf", 20);
-    fontMono = io->Fonts->AddFontFromFileTTF("fonts/RobotoMono-Regular.ttf", 20);
-    ImGui::StyleColorsLight();
+    //io->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL2_Init();
 
+    ImGui::StyleColorsLight();
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding = 5;
+    style.FrameRounding = 3;
+    style.ScrollbarRounding = 1;
+
+//#define ACCENT1 0.26f, 0.59f, 0.98f
+#define ACCENT1 0.6f, 0.6f, 0.6f
+#define ACCENT2 0.4f, 0.4f, 0.4f
+
+    style.Colors[ImGuiCol_FrameBgHovered]         = ImVec4(ACCENT1, 0.40f);
+    style.Colors[ImGuiCol_FrameBgActive]          = ImVec4(ACCENT1, 0.67f);
+    style.Colors[ImGuiCol_CheckMark]              = ImVec4(ACCENT1, 1.00f);
+    style.Colors[ImGuiCol_SliderGrab]             = ImVec4(ACCENT1, 0.78f);
+    style.Colors[ImGuiCol_SliderGrabActive]       = ImVec4(0.46f, 0.54f, 0.80f, 0.60f);
+    style.Colors[ImGuiCol_Button]                 = ImVec4(ACCENT1, 0.40f);
+    style.Colors[ImGuiCol_ButtonHovered]          = ImVec4(ACCENT1, 1.00f);
+    style.Colors[ImGuiCol_ButtonActive]           = ImVec4(ACCENT2, 1.00f);
+    style.Colors[ImGuiCol_Header]                 = ImVec4(ACCENT1, 0.31f);
+    style.Colors[ImGuiCol_HeaderHovered]          = ImVec4(ACCENT1, 0.80f);
+    style.Colors[ImGuiCol_HeaderActive]           = ImVec4(ACCENT1, 1.00f);
+    style.Colors[ImGuiCol_Separator]              = ImVec4(0.39f, 0.39f, 0.39f, 0.62f);
+    style.Colors[ImGuiCol_SeparatorHovered]       = ImVec4(0.14f, 0.44f, 0.80f, 0.78f);
+    style.Colors[ImGuiCol_SeparatorActive]        = ImVec4(0.14f, 0.44f, 0.80f, 1.00f);
+    style.Colors[ImGuiCol_ResizeGripHovered]      = ImVec4(ACCENT1, 0.67f);
+    style.Colors[ImGuiCol_ResizeGripActive]       = ImVec4(ACCENT1, 0.95f);
+    style.Colors[ImGuiCol_TableHeaderBg]          = ImVec4(0.78f, 0.87f, 0.98f, 1.00f);
+    style.Colors[ImGuiCol_TableBorderStrong]      = ImVec4(0.57f, 0.57f, 0.64f, 1.00f);
+    style.Colors[ImGuiCol_TableBorderLight]       = ImVec4(0.68f, 0.68f, 0.74f, 1.00f);
+    style.Colors[ImGuiCol_TextSelectedBg]         = ImVec4(ACCENT1, 0.35f);
+    style.Colors[ImGuiCol_DragDropTarget]         = ImVec4(ACCENT1, 0.95f);
+
+    style.Colors[ImGuiCol_Tab]                    = ImLerp(style.Colors[ImGuiCol_Header],       style.Colors[ImGuiCol_TitleBgActive], 0.90f);
+    style.Colors[ImGuiCol_TabHovered]             = style.Colors[ImGuiCol_HeaderHovered];
+    style.Colors[ImGuiCol_TabActive]              = ImLerp(style.Colors[ImGuiCol_HeaderActive], style.Colors[ImGuiCol_TitleBgActive], 0.60f);
+    style.Colors[ImGuiCol_TabUnfocused]           = ImLerp(style.Colors[ImGuiCol_Tab],          style.Colors[ImGuiCol_TitleBg], 0.80f);
+    style.Colors[ImGuiCol_TabUnfocusedActive]     = ImLerp(style.Colors[ImGuiCol_TabActive],    style.Colors[ImGuiCol_TitleBg], 0.40f);
+    style.Colors[ImGuiCol_NavHighlight]           = style.Colors[ImGuiCol_HeaderHovered];
+
     return true;
 }
 
-void guiRender(void (*func)())
+void guiRender()
 {
-   glViewport(0, 0, (int)io->DisplaySize.x, (int)io->DisplaySize.y);
-   glClearColor(1, 1, 1, 1);
-   glClear(GL_COLOR_BUFFER_BIT);
-   func();
-   SDL_GL_SwapWindow(window);
+    ImGui::Render();
+
+    const auto& displaySize = ImGui::GetIO().DisplaySize;
+    const int sizeX = static_cast<int>(displaySize.x);
+    const int sizeY = static_cast<int>(displaySize.y);
+
+    glViewport(0, 0, sizeX, sizeY);
+    glClearColor(1, 1, 1, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
+    SDL_GL_SwapWindow(window);
 }
 
-void guiHandleEvents(bool& done)
+bool guiHandleEvents()
 {
-    SDL_Event event;
+    bool done = false;
+
     for (SDL_Event event; SDL_PollEvent(&event);) {
         ImGui_ImplSDL2_ProcessEvent(&event);
-        if (event.type == SDL_QUIT)
+        if (event.type == SDL_QUIT) {
             done = true;
-        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window))
-            done = true;
+        } else if (event.type == SDL_WINDOWEVENT) {
+            const auto& ew = event.window;
+            const auto wid = SDL_GetWindowID(window);
+            if (ew.event == SDL_WINDOWEVENT_CLOSE && ew.windowID == wid)
+                done = true;
+        }
     }
+
+    return done;
 }
 
 void guiShutdown()

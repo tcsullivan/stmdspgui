@@ -17,6 +17,7 @@
 
 #include "stmdsp_code.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -24,6 +25,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include <SDL2/SDL.h>
 
 extern TextEditor editor;
 extern void log(const std::string& str);
@@ -34,9 +37,10 @@ enum class FileAction {
     Save,
     SaveAs
 };
+
 static FileAction fileAction = FileAction::None;
 static std::string fileCurrentPath;
-static std::vector<std::filesystem::path> fileTemplateList;
+static std::vector<std::filesystem::path> fileExampleList;
 
 static void saveCurrentFile()
 {
@@ -56,11 +60,31 @@ static void openCurrentFile()
     }
 }
 
-void fileScanTemplates()
+static void openNewFile()
 {
-    auto path = std::filesystem::current_path() / "templates";
-    for (const auto& file : std::filesystem::recursive_directory_iterator{path})
-        fileTemplateList.push_back(file.path());
+    fileCurrentPath.clear();
+    editor.SetText(stmdsp::file_content);
+}
+
+static std::vector<std::filesystem::path> fileScanExamples()
+{
+    const auto path = std::filesystem::current_path() / "examples";
+    const std::filesystem::recursive_directory_iterator rdi (path);
+
+    std::vector<std::filesystem::path> list;
+    std::transform(
+        std::filesystem::begin(rdi),
+        std::filesystem::end(rdi),
+        std::back_inserter(list),
+        [](const auto& file) { return file.path(); });
+    std::sort(list.begin(), list.end());
+    return list;
+}
+
+void fileInit()
+{
+    fileExampleList = fileScanExamples();
+    openNewFile();
 }
 
 void fileRenderMenu()
@@ -68,8 +92,7 @@ void fileRenderMenu()
     if (ImGui::BeginMenu("File")) {
         if (ImGui::MenuItem("New")) {
             // TODO modified?
-            fileCurrentPath.clear();
-            editor.SetText(stmdsp::file_content);
+            openNewFile();
             log("Ready.");
         }
 
@@ -79,9 +102,9 @@ void fileRenderMenu()
                 "ChooseFileOpenSave", "Choose File", ".cpp", ".");
         }
 
-        if (ImGui::BeginMenu("Open Template")) {
-            for (const auto& file : fileTemplateList) {
-                if (ImGui::MenuItem(file.filename().c_str())) {
+        if (ImGui::BeginMenu("Open Example")) {
+            for (const auto& file : fileExampleList) {
+                if (ImGui::MenuItem(file.filename().string().c_str())) {
                     fileCurrentPath = file.string();
                     openCurrentFile();
 
@@ -112,8 +135,8 @@ void fileRenderMenu()
 
         ImGui::Separator();
         if (ImGui::MenuItem("Quit")) {
-            extern bool done;
-            done = true;
+            SDL_Event quitEvent (SDL_QUIT);
+            SDL_PushEvent(&quitEvent);
         }
 
         ImGui::EndMenu();
@@ -122,22 +145,20 @@ void fileRenderMenu()
 
 void fileRenderDialog()
 {
-    if (ImGuiFileDialog::Instance()->Display("ChooseFileOpenSave")) {
+    if (ImGuiFileDialog::Instance()->Display("ChooseFileOpenSave",
+                                             ImGuiWindowFlags_NoCollapse,
+                                             ImVec2(460, 540)))
+    {
         if (ImGuiFileDialog::Instance()->IsOk()) {
             std::string filePathName = ImGuiFileDialog::Instance()->GetFilePathName();
 
-            switch (fileAction) {
-            case FileAction::None:
-                break;
-            case FileAction::Open:
+	    if (fileAction == FileAction::Open) {
                 fileCurrentPath = filePathName;
                 openCurrentFile();
                 log("Ready.");
-                break;
-            case FileAction::SaveAs:
+	    } else if (fileAction == FileAction::SaveAs) {
                 fileCurrentPath = filePathName;
                 saveCurrentFile();
-                break;
             }
         }
         

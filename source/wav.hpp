@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <string>
+#include <vector>
 
 namespace wav
 {
@@ -43,7 +45,7 @@ namespace wav
 
     class clip {
     public:
-        clip(const char *path) {
+        clip(const std::string& path) {
             std::ifstream file (path);
             if (!file.good())
                 return;
@@ -64,31 +66,30 @@ namespace wav
                 file.read(reinterpret_cast<char *>(&d), sizeof(wav::data));
                 if (!d.valid())
                     return;
-                m_data = new char[d.size + 4096 - (d.size % 4096)];
-                m_size = d.size;
-                file.read(m_data, d.size);
+                m_data.resize(d.size / sizeof(int16_t));
+                m_next = m_data.begin();
+                file.read(reinterpret_cast<char *>(m_data.data()), d.size);
             }
         }
         clip() = default;
 
         bool valid() const {
-            return m_data != nullptr && m_size > 0;
+            return !m_data.empty();
         }
-        auto data() const {
-            return m_data;
+        const int16_t *data() const {
+            return m_data.data();
         }
-        auto next(unsigned int chunksize = 3000) {
-            if (m_pos == m_size) {
-                m_pos = 0;
+        void next(int16_t *buf, unsigned int size) {
+            for (unsigned int i = 0; i < size; ++i) {
+                if (m_next == m_data.end())
+                    m_next = m_data.begin();
+                else
+                    *buf++ = *m_next++;
             }
-            auto ret = m_data + m_pos;
-            m_pos = std::min(m_pos + chunksize, m_size);
-            return ret;
         }
     private:
-        char *m_data = nullptr;
-        uint32_t m_size = 0;
-        uint32_t m_pos = 0;
+        std::vector<int16_t> m_data;
+        decltype(m_data.begin()) m_next;
     };
 }
 
