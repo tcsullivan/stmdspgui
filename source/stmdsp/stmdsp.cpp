@@ -14,6 +14,7 @@
 #include <serial/serial.h>
 
 #include <algorithm>
+#include <array>
 
 extern void log(const std::string& str);
 

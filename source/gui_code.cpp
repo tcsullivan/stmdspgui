@@ -9,15 +9,13 @@
  * If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include "code.hpp"
 #include "imgui.h"
 #include "backends/imgui_impl_sdl.h"
 #include "backends/imgui_impl_opengl2.h"
 #include "TextEditor.h"
 
 #include <string>
-
-extern void compileEditorCode(const std::string& code);
-extern void disassembleCode();
 
 TextEditor editor; // file.cpp
 

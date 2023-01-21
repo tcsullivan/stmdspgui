@@ -2,7 +2,7 @@
  * @file main.cpp
  * @brief Program entry point and main loop.
  *
- * Copyright (C) 2021 Clyne Sullivan
+ * Copyright (C) 2022 Clyne Sullivan
  *
  * Distributed under the GNU GPL v3 or later. You should have received a copy of
  * the GNU General Public License along with this program.
@@ -13,7 +13,9 @@
 #include "backends/imgui_impl_sdl.h"
 #include "backends/imgui_impl_opengl2.h"
 
+#include "gui_help.hpp"
 #include "logview.h"
+#include "main.hpp"
 #include "stmdsp.hpp"
 
 #include <chrono>
@@ -37,10 +39,6 @@ bool guiInitialize();
 bool guiHandleEvents();
 void guiShutdown();
 void guiRender();
-void helpRenderMenu();
-void helpRenderDialog();
-
-void log(const std::string& str);
 
 static LogView logView;
 static ImFont *fontSans = nullptr;
