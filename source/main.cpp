@@ -2,7 +2,7 @@
  * @file main.cpp
  * @brief Program entry point and main loop.
  *
- * Copyright (C) 2021 Clyne Sullivan
+ * Copyright (C) 2022 Clyne Sullivan
  *
  * Distributed under the GNU GPL v3 or later. You should have received a copy of
  * the GNU General Public License along with this program.
@@ -13,7 +13,9 @@
 #include "backends/imgui_impl_sdl.h"
 #include "backends/imgui_impl_opengl2.h"
 
+#include "gui_help.hpp"
 #include "logview.h"
+#include "main.hpp"
 #include "stmdsp.hpp"
 
 #include <chrono>
@@ -37,8 +39,6 @@ bool guiInitialize();
 bool guiHandleEvents();
 void guiShutdown();
 void guiRender();
-
-void log(const std::string& str);
 
 static LogView logView;
 static ImFont *fontSans = nullptr;
@@ -90,8 +90,6 @@ void log(const std::string& str)
 template<bool first>
 void renderWindow()
 {
-    static bool showHelp = false;
-
     // Start the new window frame and render the menu bar.
     ImGui_ImplOpenGL2_NewFrame();
     ImGui_ImplSDL2_NewFrame();
@@ -101,24 +99,7 @@ void renderWindow()
         fileRenderMenu();
         deviceRenderMenu();
         codeRenderMenu();
-
-        if (ImGui::BeginMenu("Help")) {
-            if (ImGui::MenuItem("Open wiki...")) {
-#ifdef STMDSP_WIN32
-                system("start "
-#else
-                system("xdg-open "
-#endif
-                    "https://code.bitgloo.com/clyne/stmdspgui/wiki");
-            }
-
-            ImGui::Separator();
-            if (ImGui::MenuItem("About")) {
-                showHelp = true;
-            }
-
-            ImGui::EndMenu();
-        }
+	helpRenderMenu();
 
         ImGui::EndMainMenuBar();
     }
@@ -142,6 +123,7 @@ void renderWindow()
     codeRenderToolbar();
     deviceRenderToolbar();
     fileRenderDialog();
+    helpRenderDialog();
     deviceRenderWidgets();
     ImGui::PopFont();
 
@@ -159,18 +141,6 @@ void renderWindow()
     ImGui::PopFont();
 
     deviceRenderDraw();
-
-    if (showHelp) {
-        ImGui::Begin("help");
-
-        ImGui::Text("stmdspgui\nCompiled on " __DATE__ ".\n\nWritten by Clyne Sullivan.\n");
-
-        if (ImGui::Button("Close")) {
-            showHelp = false;
-        }
-
-        ImGui::End();
-    }
 
     // Draw everything to the screen.
     guiRender();

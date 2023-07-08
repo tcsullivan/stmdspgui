@@ -2,13 +2,14 @@
  * @file code.cpp
  * @brief Functionality for compiling and disassembling source code.
  *
- * Copyright (C) 2021 Clyne Sullivan
+ * Copyright (C) 2022 Clyne Sullivan
  *
  * Distributed under the GNU GPL v3 or later. You should have received a copy of
  * the GNU General Public License along with this program.
  * If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include "main.hpp"
 #include "stmdsp.hpp"
 #include "stmdsp_code.hpp"
 
@@ -20,20 +21,32 @@
 #include <string>
 
 extern std::shared_ptr<stmdsp::device> m_device;
-void log(const std::string& str);
 
-std::ifstream compileOpenBinaryFile();
-void compileEditorCode(const std::string& code);
-void disassembleCode();
-
+// Stores the temporary file name currently used for compiling the algorithm.
 static std::string tempFileName;
+
+/**
+ * Generates a new temporary file name.
+ * @return A string containing the path and file name.
+ */
 static std::string newTempFileName();
-static bool codeExecuteCommand(
-    const std::string& command,
-    const std::string& file);
-static void stringReplaceAll(
-    std::string& str,
-    const std::string& what,
+
+/**
+ * Executes the given command using system(), collecting the text output in the
+ * given file.
+ * @param command The command to be executed.
+ * @param file The file to write command output to.
+ * @return True if the command was successful (i.e. returned zero).
+ */
+static bool codeExecuteCommand(const std::string& command, const std::string& file);
+
+/**
+ * Does an in-place replacement of all occurances of "what" with "with".
+ * @param str The text string to operate on.
+ * @param what The text to search for.
+ * @param with The text that will replace occurances of "what".
+ */
+static void stringReplaceAll(std::string& str, const std::string& what,
     const std::string& with);
 
 std::ifstream compileOpenBinaryFile()
