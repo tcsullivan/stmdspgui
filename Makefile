@@ -1,6 +1,8 @@
 CXX = g++
 
 CXXFILES := \
+    kissfft/kiss_fft.c \
+    kissfft/kiss_fftr.c \
     source/serial/src/serial.cc \
     $(wildcard source/imgui/backends/*.cpp) \
     $(wildcard source/imgui/*.cpp) \
@@ -8,7 +10,7 @@ CXXFILES := \
     $(wildcard source/*.cpp)
 
 CXXFLAGS := -std=c++20 -O2 \
-            -Isource -Isource/imgui -Isource/stmdsp -Isource/serial/include \
+            -Isource -Isource/imgui -Isource/stmdsp -Isource/serial/include -Ikissfft \
             -Wall -Wextra -pedantic #-DSTMDSP_DISABLE_FORMULAS
 
 ifeq ($(OS),Windows_NT)
@@ -24,7 +26,7 @@ LDFLAGS = -lSDL2 -lGL -lpthread
 OUTPUT := stmdspgui
 endif
 
-OFILES := $(patsubst %.cc, %.o, $(patsubst %.cpp, %.o, $(CXXFILES)))
+OFILES := $(patsubst %.c, %.o, $(patsubst %.cc, %.o, $(patsubst %.cpp, %.o, $(CXXFILES))))
 
 all: $(OUTPUT)
 

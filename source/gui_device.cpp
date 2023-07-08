@@ -2,6 +2,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "ImGuiFileDialog.h"
+#include "kiss_fftr.h"
 
 #include "stmdsp.hpp"
 
@@ -24,7 +25,7 @@ void deviceLoadAudioFile(const std::string& file);
 void deviceLoadLogFile(const std::string& file);
 void deviceSetSampleRate(unsigned int index);
 void deviceSetInputDrawing(bool enabled);
-void deviceStart(bool logResults, bool drawSamples);
+void deviceStart(bool fetchSamples);
 void deviceStartMeasurement();
 void deviceUpdateDrawBufferSize(double timeframe);
 std::size_t pullFromDrawQueue(
@@ -36,6 +37,7 @@ static std::string sampleRatePreview = "?";
 static bool measureCodeTime = false;
 static bool logResults = false;
 static bool drawSamples = false;
+static bool drawFrequencies = false;
 static bool popupRequestBuffer = false;
 static bool popupRequestSiggen = false;
 static bool popupRequestLog = false;
@@ -53,6 +55,7 @@ void deviceRenderDisconnect()
     measureCodeTime = false;
     logResults = false;
     drawSamples = false;
+    drawFrequencies = false;
 }
 
 void deviceRenderMenu()
@@ -83,7 +86,7 @@ void deviceRenderMenu()
         static std::string startLabel ("Start");
         addMenuItem(startLabel, isConnected, [&] {
                 startLabel = isRunning ? "Start" : "Stop";
-                deviceStart(logResults, drawSamples);
+                deviceStart(logResults || drawSamples || drawFrequencies);
                 if (logResults && isRunning)
                     logResults = false;
             });
@@ -97,7 +100,8 @@ void deviceRenderMenu()
         if (!isConnected || isRunning)
             ImGui::PushDisabled(); // Hey, pushing disabled!
 
-        ImGui::Checkbox("Draw samples", &drawSamples);
+        ImGui::Checkbox("Plot over time", &drawSamples);
+        ImGui::Checkbox("Plot over freq.", &drawFrequencies);
         if (ImGui::Checkbox("Log results...", &logResults)) {
             if (logResults)
                 popupRequestLog = true;
@@ -275,13 +279,16 @@ void deviceRenderWidgets()
 
 void deviceRenderDraw()
 {
-    if (drawSamples) {
-        static std::vector<stmdsp::dacsample_t> buffer;
-        static std::vector<stmdsp::dacsample_t> bufferInput;
-        static auto bufferCirc = CircularBuffer(buffer);
-        static auto bufferInputCirc = CircularBuffer(bufferInput);
+    static std::vector<stmdsp::dacsample_t> buffer;
+    static std::vector<stmdsp::dacsample_t> bufferInput;
+    static std::vector<kiss_fft_scalar> bufferFFTIn;
+    static std::vector<kiss_fft_cpx> bufferFFTOut;
+    static auto bufferCirc = CircularBuffer(buffer);
+    static auto bufferInputCirc = CircularBuffer(bufferInput);
+    static bool drawSamplesInput = false;
+    static kiss_fftr_cfg kisscfg;
 
-        static bool drawSamplesInput = false;
+    if (drawSamples) {
         static unsigned int yMinMax = 4095;
 
         ImGui::Begin("draw", &drawSamples);
@@ -410,6 +417,74 @@ void deviceRenderDraw()
                 snprintf(buf, sizeof(buf), "   %1.3fV", s);
                 drawList->AddText({mouse.x, mouse.y + 20}, IM_COL32(0, 0, 255, 255), buf);
             }
+        }
+
+        ImGui::End();
+    } else if (drawFrequencies) {
+        ImGui::Begin("draw", &drawFrequencies);
+
+        ImGui::Text("Time: %0.3f sec", drawSamplesTimeframe);
+        ImGui::SameLine();
+        if (ImGui::Button("-", {30, 0})) {
+            drawSamplesTimeframe = std::max(drawSamplesTimeframe / 2., 0.0078125);
+            deviceUpdateDrawBufferSize(drawSamplesTimeframe);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("+", {30, 0})) {
+            drawSamplesTimeframe = std::min(drawSamplesTimeframe * 2, 32.);
+            deviceUpdateDrawBufferSize(drawSamplesTimeframe);
+        }
+
+        auto newSize = pullFromDrawQueue(bufferCirc);
+        if (newSize > 0) {
+            buffer.resize(newSize);
+            bufferFFTIn.resize(newSize);
+            bufferFFTOut.resize(newSize);
+            bufferCirc = CircularBuffer(buffer);
+            pullFromDrawQueue(bufferCirc);
+
+            kiss_fftr_free(kisscfg);
+            kisscfg = kiss_fftr_alloc(buffer.size(), false, nullptr, nullptr);
+        }
+
+        std::copy(buffer.begin(), buffer.end(), bufferFFTIn.begin());
+        kiss_fftr(kisscfg, bufferFFTIn.data(), bufferFFTOut.data());
+
+        auto drawList = ImGui::GetWindowDrawList();
+        ImVec2 p0 = ImGui::GetWindowPos();
+        auto size = ImGui::GetWindowSize();
+        p0.y += 65;
+        size.y -= 70;
+        drawList->AddRectFilled(p0, {p0.x + size.x, p0.y + size.y}, IM_COL32_BLACK);
+
+        const auto lcMinor = ImGui::GetColorU32(IM_COL32(40, 40, 40, 255));
+        const auto lcMajor = ImGui::GetColorU32(IM_COL32(140, 140, 140, 255));
+
+        {
+            const float yinc = size.y / 10.f;
+            for (int i = 1; i < 10; ++i) {
+                drawList->AddLine({p0.x, p0.y + i * yinc}, {p0.x + size.x, p0.y + i * yinc}, (i % 2) ? lcMinor : lcMajor);
+            }
+        }
+        {
+            const float xinc = size.x / 10.f;
+            for (int i = 1; i < 10; ++i) {
+                drawList->AddLine({p0.x + i * xinc, p0.y}, {p0.x + i * xinc, p0.y + size.y}, (i % 2) ? lcMinor : lcMajor);
+            }
+        }
+
+        const float di = static_cast<float>(buffer.size() / 2) / size.x;
+        const float dx = std::ceil(size.x / static_cast<float>(buffer.size()));
+        ImVec2 pp = p0;
+        float i = 0;
+        while (pp.x < p0.x + size.x) {
+            unsigned int idx = i;
+            float n = std::clamp(bufferFFTOut[idx].r / buffer.size() / 2.f, 0.f, 1.f);
+            i += di;
+
+            ImVec2 next (pp.x + dx, p0.y + size.y * (1 - n));
+            drawList->AddLine(pp, next, ImGui::GetColorU32(IM_COL32(255, 0, 0, 255)), 2.f);
+            pp = next;
         }
 
         ImGui::End();
